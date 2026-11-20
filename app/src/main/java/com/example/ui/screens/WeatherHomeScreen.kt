@@ -441,13 +441,13 @@ private fun formatEditorialDate(currentIso: String): String {
         val dateStr = currentIso.substringBefore("T")
         val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val parsed = parser.parse(dateStr) ?: Date()
-        val ru = Locale("ru", "RU")
+        val ru = Locale.forLanguageTag("ru-RU")
         val dayOfWeek = SimpleDateFormat("EEEE", ru).format(parsed)
             .replaceFirstChar { it.uppercase(ru) }
         val dayMonth = SimpleDateFormat("d MMMM", ru).format(parsed)
         "$dayOfWeek, $dayMonth"
     } catch (_: Exception) {
-        val ru = Locale("ru", "RU")
+        val ru = Locale.forLanguageTag("ru-RU")
         val now = Date()
         val dayOfWeek = SimpleDateFormat("EEEE", ru).format(now)
             .replaceFirstChar { it.uppercase(ru) }

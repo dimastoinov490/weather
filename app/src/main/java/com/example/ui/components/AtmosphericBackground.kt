@@ -165,7 +165,7 @@ fun FullBleedWeatherBackdrop(
                     drawRect(Color(0x2E183254))
                     particles.forEachIndexed { idx, p ->
                         val yProg = ((p.yFrac + phase * p.speed * 1.3f) % 1.0f)
-                        val sway = sin((phase * 2 * PI + idx).toDouble()).toFloat() * 14f
+                        val sway = sin(phase * 2 * PI + idx).toFloat() * 14f
                         drawCircle(
                             color = Color.White.copy(alpha = p.alpha * 0.85f),
                             radius = p.size * 1.15f,

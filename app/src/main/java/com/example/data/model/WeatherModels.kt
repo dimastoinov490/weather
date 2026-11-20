@@ -220,7 +220,7 @@ data class WeatherReport(
 
 object WeatherMapper {
 
-    private val russianLocale = Locale("ru", "RU")
+    private val russianLocale = Locale.forLanguageTag("ru-RU")
 
     fun resolveMood(weatherCode: Int, isDay: Boolean): WeatherMood {
         return when (weatherCode) {

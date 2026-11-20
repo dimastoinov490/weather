@@ -117,7 +117,7 @@ class WeatherRepository(
     @Suppress("DEPRECATION")
     private suspend fun reverseGeocodeCity(lat: Double, lon: Double): Triple<String, String, String> {
         return runCatching {
-            val geocoder = Geocoder(context, Locale("ru", "RU"))
+            val geocoder = Geocoder(context, Locale.forLanguageTag("ru-RU"))
             val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 suspendCancellableCoroutine { cont ->
                     geocoder.getFromLocation(lat, lon, 1) { list ->
