@@ -1,55 +1,83 @@
 package com.example.ui.components
 
-import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Color as AndroidColor
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import android.graphics.Path as AndroidPath
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
-import android.os.Handler
-import android.os.Looper
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.util.TypedValue
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.example.ui.theme.AmberPrimary
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.R
+import com.example.data.remote.NetworkModule
 import com.example.ui.theme.IceWhite
+import com.example.ui.theme.MutedText
 import com.example.ui.theme.ObsidianBg
-import org.json.JSONObject
-
-enum class WeatherMapLayer(val jsKey: String, val label: String) {
-    PRECIPITATION("precipitation", "Осадки"),
-    CLOUDS("clouds", "Облачность")
-}
+import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
+import org.osmdroid.tileprovider.MapTileProviderBasic
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.MapTileIndex
+import org.osmdroid.views.CustomZoomButtonsController
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.TilesOverlay
+import java.io.File
+import kotlin.math.roundToInt
 
 data class WeatherMapMarkerInfo(
     val latitude: Double,
@@ -66,34 +94,12 @@ data class WeatherMapController(
     internal val onZoomIn: () -> Unit = {},
     internal val onZoomOut: () -> Unit = {},
     internal val onRecenter: () -> Unit = {},
-    internal val onReload: () -> Unit = {}
+    internal val onReloadRadar: () -> Unit = {}
 ) {
     fun zoomIn() = onZoomIn()
     fun zoomOut() = onZoomOut()
     fun recenter() = onRecenter()
-    fun reload() = onReload()
-}
-
-private class WeatherMapJsBridge(
-    private val mainHandler: Handler,
-    private val onMapReadyCallback: () -> Unit,
-    private val onZoomChangedCallback: (Int) -> Unit,
-    private val onLayerStatusCallback: (layerKey: String, timestampEpochSec: Long, isFallback: Boolean) -> Unit
-) {
-    @JavascriptInterface
-    fun onMapReady() {
-        mainHandler.post { onMapReadyCallback() }
-    }
-
-    @JavascriptInterface
-    fun onZoomChanged(zoom: Int) {
-        mainHandler.post { onZoomChangedCallback(zoom) }
-    }
-
-    @JavascriptInterface
-    fun onLayerStatus(layerKey: String, timestampEpochSec: Long, isFallback: Boolean) {
-        mainHandler.post { onLayerStatusCallback(layerKey, timestampEpochSec, isFallback) }
-    }
+    fun reloadRadar() = onReloadRadar()
 }
 
 fun isNetworkAvailable(context: Context): Boolean {
@@ -104,136 +110,212 @@ fun isNetworkAvailable(context: Context): Boolean {
     return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun InteractiveWeatherWebViewMap(
+fun rememberNetworkAvailability(): Boolean {
+    val context = LocalContext.current
+    var available by remember { mutableStateOf(isNetworkAvailable(context)) }
+
+    DisposableEffect(context) {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        if (cm == null) {
+            return@DisposableEffect onDispose {}
+        }
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                available = true
+            }
+
+            override fun onLost(network: Network) {
+                available = isNetworkAvailable(context)
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                available = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }
+        }
+        runCatching { cm.registerDefaultNetworkCallback(callback) }
+        onDispose {
+            runCatching { cm.unregisterNetworkCallback(callback) }
+        }
+    }
+    return available
+}
+
+@Composable
+fun NativeOsmdroidWeatherMap(
     markerInfo: WeatherMapMarkerInfo,
-    activeLayer: WeatherMapLayer,
-    zoom: Int,
+    initialZoom: Int,
+    isOnline: Boolean,
     onZoomChanged: (Int) -> Unit,
-    onLayerStatusChanged: (layerKey: String, timestampEpochSec: Long, isFallback: Boolean) -> Unit,
+    onRadarStatusMessage: (String?) -> Unit,
     onControllerReady: (WeatherMapController) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
-
+    val lifecycleOwner = LocalLifecycleOwner.current
     val latestZoomChanged by rememberUpdatedState(onZoomChanged)
-    val latestLayerStatusChanged by rememberUpdatedState(onLayerStatusChanged)
+    val latestRadarStatus by rememberUpdatedState(onRadarStatusMessage)
+    val latestMarkerInfo by rememberUpdatedState(markerInfo)
 
-    var isPageReady by remember { mutableStateOf(false) }
-    var isMapReady by remember { mutableStateOf(false) }
-    var hasLoadError by remember { mutableStateOf(false) }
+    var radarRetryTrigger by remember { mutableIntStateOf(0) }
+    var activeRadarOverlay by remember { mutableStateOf<TilesOverlay?>(null) }
+    var activeRadarProvider by remember { mutableStateOf<MapTileProviderBasic?>(null) }
 
-    val initialHtml = remember {
-        buildLeafletWeatherHtml(
-            initialLat = markerInfo.latitude,
-            initialLon = markerInfo.longitude,
-            initialZoom = zoom,
-            initialLayer = activeLayer.jsKey,
-            marker = markerInfo
-        )
+    // Configure osmdroid userAgentValue and app-private cache directory before creating MapView
+    remember(context) {
+        val osmConfig = Configuration.getInstance()
+        osmConfig.userAgentValue = context.packageName
+        val cacheRoot = File(context.cacheDir, "osmdroid").apply { mkdirs() }
+        osmConfig.osmdroidBasePath = cacheRoot
+        osmConfig.osmdroidTileCache = File(cacheRoot, "tiles").apply { mkdirs() }
+        true
     }
 
-    val webView = remember {
-        WebView(context).apply {
-            setBackgroundColor(AndroidColor.parseColor("#0B0F18"))
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                cacheMode = WebSettings.LOAD_DEFAULT
-                loadsImagesAutomatically = true
-                useWideViewPort = true
-                loadWithOverviewMode = true
-                builtInZoomControls = false
-                displayZoomControls = false
-                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                userAgentString = "${userAgentString.orEmpty()} NeboWeather/1.0 (Android)"
-            }
-
-            addJavascriptInterface(
-                WeatherMapJsBridge(
-                    mainHandler = mainHandler,
-                    onMapReadyCallback = {
-                        isMapReady = true
-                        hasLoadError = false
-                    },
-                    onZoomChangedCallback = { newZoom ->
-                        latestZoomChanged(newZoom)
-                    },
-                    onLayerStatusCallback = { layerKey, ts, isFallback ->
-                        latestLayerStatusChanged(layerKey, ts, isFallback)
-                    }
-                ),
-                "AndroidMapBridge"
-            )
-
-            webChromeClient = WebChromeClient()
-            webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    isPageReady = true
-                }
-
-                override fun onReceivedError(
-                    view: WebView?,
-                    request: WebResourceRequest?,
-                    error: WebResourceError?
-                ) {
-                    super.onReceivedError(view, request, error)
-                    if (request?.isForMainFrame == true) {
-                        hasLoadError = true
-                    }
-                }
-            }
-
-            loadDataWithBaseURL(
-                "https://nebo.weather.app/",
-                initialHtml,
-                "text/html",
-                "UTF-8",
-                null
-            )
+    val mapView = remember {
+        MapView(context).apply {
+            setTileSource(TileSourceFactory.MAPNIK)
+            setMultiTouchControls(true)
+            isTilesScaledToDpi = true
+            minZoomLevel = 3.0
+            maxZoomLevel = 18.0
+            zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
+            controller.setZoom(initialZoom.toDouble())
+            controller.setCenter(GeoPoint(markerInfo.latitude, markerInfo.longitude))
         }
     }
 
-    DisposableEffect(webView) {
+    val cityMarker = remember(mapView) {
+        Marker(mapView).apply {
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+        }
+    }
+
+    // Track last centered city coordinates so tapping "Recenter" or switching cities moves cleanly
+    var lastCenteredLatLon by remember {
+        mutableStateOf(markerInfo.latitude to markerInfo.longitude)
+    }
+
+    // Attach zoom listener & marker once, handle lifecycle resume/pause/detach
+    DisposableEffect(mapView, lifecycleOwner) {
+        if (!mapView.overlays.contains(cityMarker)) {
+            mapView.overlays.add(cityMarker)
+        }
+
+        val listener = object : MapListener {
+            override fun onScroll(event: ScrollEvent?): Boolean = false
+
+            override fun onZoom(event: ZoomEvent?): Boolean {
+                val z = mapView.zoomLevelDouble.roundToInt().coerceIn(3, 18)
+                latestZoomChanged(z)
+                return false
+            }
+        }
+        mapView.addMapListener(listener)
+
         onControllerReady(
             WeatherMapController(
-                onZoomIn = { webView.evaluateJavascript("window.zoomInMap && window.zoomInMap();", null) },
-                onZoomOut = { webView.evaluateJavascript("window.zoomOutMap && window.zoomOutMap();", null) },
-                onRecenter = { webView.evaluateJavascript("window.recenterOnCity && window.recenterOnCity();", null) },
-                onReload = {
-                    hasLoadError = false
-                    isMapReady = false
-                    webView.loadDataWithBaseURL(
-                        "https://nebo.weather.app/",
-                        buildLeafletWeatherHtml(
-                            initialLat = markerInfo.latitude,
-                            initialLon = markerInfo.longitude,
-                            initialZoom = zoom,
-                            initialLayer = activeLayer.jsKey,
-                            marker = markerInfo
-                        ),
-                        "text/html",
-                        "UTF-8",
-                        null
-                    )
+                onZoomIn = { mapView.controller.zoomIn() },
+                onZoomOut = { mapView.controller.zoomOut() },
+                onRecenter = {
+                    val info = latestMarkerInfo
+                    val target = GeoPoint(info.latitude, info.longitude)
+                    mapView.controller.animateTo(target, mapView.zoomLevelDouble.coerceAtLeast(7.0), 550L)
+                },
+                onReloadRadar = {
+                    radarRetryTrigger++
                 }
             )
         )
-        webView.onResume()
+
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        mapView.onResume()
+
         onDispose {
-            webView.onPause()
-            webView.removeJavascriptInterface("AndroidMapBridge")
-            webView.destroy()
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            mapView.removeMapListener(listener)
+            activeRadarProvider?.detach()
+            mapView.onPause()
+            mapView.onDetach()
         }
     }
 
-    // Update marker and recenter when selected city or weather report updates
+    // Fetch latest RainViewer past radar frame and attach native TilesOverlay above OSM streets
+    LaunchedEffect(isOnline, radarRetryTrigger) {
+        if (!isOnline) {
+            latestRadarStatus(context.getString(R.string.map_offline_message))
+            return@LaunchedEffect
+        }
+
+        val result = runCatching { NetworkModule.rainViewerApi.getRadarMaps() }
+        result.onSuccess { response ->
+            val latestFrame = response.radar?.past?.lastOrNull()
+            if (latestFrame != null && latestFrame.path.isNotBlank()) {
+                val host = response.host.trimEnd('/')
+                val path = latestFrame.path
+                val radarTileSource = object : OnlineTileSourceBase(
+                    "RainViewer_${latestFrame.time}",
+                    0,
+                    7,
+                    256,
+                    ".png",
+                    arrayOf("$host$path/256/")
+                ) {
+                    override fun getTileURLString(pMapTileIndex: Long): String {
+                        val z = MapTileIndex.getZoom(pMapTileIndex)
+                        val x = MapTileIndex.getX(pMapTileIndex)
+                        val y = MapTileIndex.getY(pMapTileIndex)
+                        return "$host$path/256/$z/$x/$y/2/1_1.png"
+                    }
+                }
+
+                // Replace any previous radar overlay cleanly
+                activeRadarOverlay?.let { oldOverlay ->
+                    mapView.overlays.remove(oldOverlay)
+                }
+                activeRadarProvider?.detach()
+
+                val tileProvider = MapTileProviderBasic(context, radarTileSource).apply {
+                    setUseDataConnection(true)
+                }
+                val alphaMatrix = ColorMatrix().apply {
+                    setScale(1f, 1f, 1f, 0.70f)
+                }
+                val radarOverlay = TilesOverlay(tileProvider, context).apply {
+                    loadingBackgroundColor = AndroidColor.TRANSPARENT
+                    loadingLineColor = AndroidColor.TRANSPARENT
+                    setColorFilter(ColorMatrixColorFilter(alphaMatrix))
+                }
+
+                // Keep city marker on top of the radar TilesOverlay
+                val markerIndex = mapView.overlays.indexOf(cityMarker)
+                if (markerIndex >= 0) {
+                    mapView.overlays.add(markerIndex, radarOverlay)
+                } else {
+                    mapView.overlays.add(radarOverlay)
+                    mapView.overlays.add(cityMarker)
+                }
+
+                activeRadarProvider = tileProvider
+                activeRadarOverlay = radarOverlay
+                latestRadarStatus(null)
+                mapView.invalidate()
+            } else {
+                latestRadarStatus(context.getString(R.string.map_tile_error_message))
+            }
+        }.onFailure {
+            latestRadarStatus(context.getString(R.string.map_tile_error_message))
+        }
+    }
+
+    // Update marker appearance and recenter when city or temperature updates
     LaunchedEffect(
-        isPageReady,
-        isMapReady,
         markerInfo.latitude,
         markerInfo.longitude,
         markerInfo.cityName,
@@ -243,63 +325,95 @@ fun InteractiveWeatherWebViewMap(
         markerInfo.humidityText,
         markerInfo.windText
     ) {
-        if (isPageReady) {
-            val jsCall = """
-                window.updateWeatherMarker && window.updateWeatherMarker(
-                    ${markerInfo.latitude},
-                    ${markerInfo.longitude},
-                    ${JSONObject.quote(markerInfo.cityName)},
-                    ${JSONObject.quote(markerInfo.temperatureText)},
-                    ${JSONObject.quote(markerInfo.conditionText)},
-                    ${JSONObject.quote(markerInfo.iconEmoji)},
-                    ${JSONObject.quote(markerInfo.humidityText)},
-                    ${JSONObject.quote(markerInfo.windText)}
-                );
-            """.trimIndent()
-            webView.evaluateJavascript(jsCall, null)
-        }
-    }
+        val point = GeoPoint(markerInfo.latitude, markerInfo.longitude)
+        cityMarker.position = point
+        cityMarker.title = "${markerInfo.cityName} • ${markerInfo.temperatureText}"
+        cityMarker.snippet = "${markerInfo.conditionText} • Влажность: ${markerInfo.humidityText}, Ветер: ${markerInfo.windText}"
+        cityMarker.icon = createCityWeatherPinDrawable(
+            context = context,
+            emoji = markerInfo.iconEmoji,
+            temperatureText = markerInfo.temperatureText,
+            cityName = markerInfo.cityName
+        )
 
-    // Update active radar/cloud layer when toggle changes
-    LaunchedEffect(isPageReady, isMapReady, activeLayer) {
-        if (isPageReady) {
-            val jsCall = "window.setWeatherLayer && window.setWeatherLayer(${JSONObject.quote(activeLayer.jsKey)});"
-            webView.evaluateJavascript(jsCall, null)
+        val coordsChanged = kotlin.math.abs(lastCenteredLatLon.first - markerInfo.latitude) > 0.0001 ||
+            kotlin.math.abs(lastCenteredLatLon.second - markerInfo.longitude) > 0.0001
+        if (coordsChanged) {
+            lastCenteredLatLon = markerInfo.latitude to markerInfo.longitude
+            mapView.controller.animateTo(point)
         }
+        mapView.invalidate()
     }
 
     Box(
         modifier = modifier
             .background(ObsidianBg)
-            .testTag("weather_map_webview_container")
+            .testTag("weather_map_native_container")
     ) {
         AndroidView(
-            factory = { webView },
+            factory = { mapView },
             modifier = Modifier.fillMaxSize()
         )
 
-        if (!isMapReady && !hasLoadError) {
+        if (!isOnline && activeRadarOverlay == null) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.Center)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xD90D121E))
-                    .padding(horizontal = 20.dp, vertical = 14.dp)
+                    .fillMaxSize()
+                    .background(Color(0x990A0816)),
+                contentAlignment = Alignment.Center
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = Color(0xEB151029),
+                    border = BorderStroke(1.dp, Color(0x668B5CF6)),
+                    modifier = Modifier
+                        .padding(24.dp)
+                        .widthIn(max = 360.dp)
                 ) {
-                    CircularProgressIndicator(
-                        color = AmberPrimary,
-                        strokeWidth = 2.5.dp,
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Text(
-                        text = "Загрузка карты и радара…",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = IceWhite
-                    )
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CloudOff,
+                            contentDescription = null,
+                            tint = Color(0xFFA78BFA),
+                            modifier = Modifier.size(44.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Карта недоступна",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = IceWhite
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = stringResource(R.string.map_offline_message),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MutedText,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(18.dp))
+                        Button(
+                            onClick = { radarRetryTrigger++ },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF7C3AED),
+                                contentColor = IceWhite
+                            ),
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("map_fatal_retry_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .padding(end = 6.dp)
+                                    .size(18.dp)
+                            )
+                            Text(text = stringResource(R.string.retry_button))
+                        }
+                    }
                 }
             }
         }
@@ -321,369 +435,84 @@ fun weatherConditionEmoji(weatherCode: Int, isDay: Boolean): String {
     }
 }
 
-private fun buildLeafletWeatherHtml(
-    initialLat: Double,
-    initialLon: Double,
-    initialZoom: Int,
-    initialLayer: String,
-    marker: WeatherMapMarkerInfo
-): String {
-    val cityJson = JSONObject.quote(marker.cityName)
-    val tempJson = JSONObject.quote(marker.temperatureText)
-    val condJson = JSONObject.quote(marker.conditionText)
-    val emojiJson = JSONObject.quote(marker.iconEmoji)
-    val humidityJson = JSONObject.quote(marker.humidityText)
-    val windJson = JSONObject.quote(marker.windText)
-    val layerJson = JSONObject.quote(initialLayer)
+private fun createCityWeatherPinDrawable(
+    context: Context,
+    emoji: String,
+    temperatureText: String,
+    cityName: String
+): BitmapDrawable {
+    val density = context.resources.displayMetrics.density
+    val metrics = context.resources.displayMetrics
 
-    return """
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Небо — Карта погоды</title>
-  <link id="leaflet-css" rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <style>
-    html, body, #map {
-      margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      background: #0B0F18;
-      overflow: hidden;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    val tempPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.parseColor("#38BDF8")
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 15f, metrics)
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
-    .osm-base-tiles {
-      filter: brightness(0.88) contrast(1.06) saturate(0.92);
+    val cityPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.parseColor("#F8FAFC")
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 13f, metrics)
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
     }
-    .leaflet-control-attribution {
-      background: rgba(11, 15, 24, 0.72) !important;
-      color: rgba(248, 250, 252, 0.7) !important;
-      font-size: 10px !important;
-      border-top-right-radius: 8px;
-      padding: 2px 6px !important;
-    }
-    .leaflet-control-attribution a {
-      color: #F59E0B !important;
-      text-decoration: none;
-    }
-    .nebo-marker-wrap {
-      background: transparent;
-      border: none;
-    }
-    .nebo-marker-card {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 12px;
-      border-radius: 16px;
-      background: rgba(13, 18, 30, 0.92);
-      border: 1.5px solid rgba(245, 158, 11, 0.85);
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.48), 0 0 14px rgba(245, 158, 11, 0.28);
-      color: #F8FAFC;
-      white-space: nowrap;
-      transform: translate(-50%, -100%);
-      position: relative;
-    }
-    .nebo-marker-card::after {
-      content: "";
-      position: absolute;
-      left: 50%;
-      bottom: -7px;
-      transform: translateX(-50%) rotate(45deg);
-      width: 11px;
-      height: 11px;
-      background: rgba(13, 18, 30, 0.94);
-      border-right: 1.5px solid rgba(245, 158, 11, 0.85);
-      border-bottom: 1.5px solid rgba(245, 158, 11, 0.85);
-    }
-    .nebo-emoji {
-      font-size: 20px;
-      line-height: 1;
-    }
-    .nebo-info {
-      display: flex;
-      flex-direction: column;
-      line-height: 1.15;
-    }
-    .nebo-top {
-      display: flex;
-      align-items: baseline;
-      gap: 6px;
-    }
-    .nebo-temp {
-      font-size: 16px;
-      font-weight: 700;
-      color: #F59E0B;
-    }
-    .nebo-city {
-      font-size: 13px;
-      font-weight: 600;
-      color: #F8FAFC;
-    }
-    .nebo-cond {
-      font-size: 11px;
-      color: #CBD5E1;
-      margin-top: 1px;
-    }
-    .leaflet-popup-content-wrapper, .leaflet-popup-tip {
-      background: rgba(13, 18, 30, 0.95) !important;
-      color: #F8FAFC !important;
-      border: 1px solid rgba(245, 158, 11, 0.45);
-      border-radius: 14px !important;
-    }
-    .leaflet-popup-close-button {
-      color: #CBD5E1 !important;
-    }
-  </style>
-</head>
-<body>
-  <div id="map"></div>
-
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
-    (function ensureLeafletAndBoot() {
-      if (typeof L !== 'undefined') {
-        bootMap();
-        return;
-      }
-      var fallbackCss = document.createElement('link');
-      fallbackCss.rel = 'stylesheet';
-      fallbackCss.href = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';
-      document.head.appendChild(fallbackCss);
-
-      var fallbackScript = document.createElement('script');
-      fallbackScript.src = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';
-      fallbackScript.onload = bootMap;
-      document.head.appendChild(fallbackScript);
-    })();
-
-    var map = null;
-    var weatherMarker = null;
-    var precipitationLayer = null;
-    var cloudsLayer = null;
-    var currentLayerKey = $layerJson;
-    var lastCityCoords = [$initialLat, $initialLon];
-    var radarTimestamp = 0;
-    var cloudsTimestamp = 0;
-    var cloudsIsFallback = false;
-
-    function escapeHtml(str) {
-      if (!str) return '';
-      return String(str)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
+    val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 15f, metrics)
     }
 
-    function createWeatherIcon(tempText, cityName, conditionText, iconEmoji) {
-      var html =
-        '<div class="nebo-marker-card">' +
-          '<span class="nebo-emoji">' + escapeHtml(iconEmoji) + '</span>' +
-          '<div class="nebo-info">' +
-            '<div class="nebo-top">' +
-              '<span class="nebo-temp">' + escapeHtml(tempText) + '</span>' +
-              '<span class="nebo-city">' + escapeHtml(cityName) + '</span>' +
-            '</div>' +
-            '<div class="nebo-cond">' + escapeHtml(conditionText) + '</div>' +
-          '</div>' +
-        '</div>';
-      return L.divIcon({
-        className: 'nebo-marker-wrap',
-        html: html,
-        iconSize: [0, 0],
-        iconAnchor: [0, 8]
-      });
+    val safeCity = if (cityName.length > 16) cityName.take(15) + "…" else cityName
+    val emojiW = emojiPaint.measureText(emoji)
+    val tempW = tempPaint.measureText(temperatureText)
+    val cityW = cityPaint.measureText(safeCity)
+
+    val hPad = 12f * density
+    val gap = 6f * density
+    val vPad = 8f * density
+    val pointerH = 8f * density
+    val shadowPad = 4f * density
+
+    val pillW = (hPad * 2f + emojiW + gap + tempW + gap + cityW).coerceAtLeast(96f * density)
+    val textHeight = tempPaint.fontMetrics.let { it.descent - it.ascent }
+    val pillH = textHeight + vPad * 2f
+
+    val totalW = (pillW + shadowPad * 2f).roundToInt().coerceAtLeast(1)
+    val totalH = (pillH + pointerH + shadowPad * 2f).roundToInt().coerceAtLeast(1)
+
+    val bitmap = Bitmap.createBitmap(totalW, totalH, Bitmap.Config.ARGB_8888)
+    val canvas = AndroidCanvas(bitmap)
+
+    val rect = RectF(shadowPad, shadowPad, shadowPad + pillW, shadowPad + pillH)
+    val radius = 14f * density
+
+    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.parseColor("#EB140F2A")
+        style = Paint.Style.FILL
+        setShadowLayer(4f * density, 0f, 2f * density, AndroidColor.argb(140, 0, 0, 0))
+    }
+    val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.parseColor("#DDA78BFA")
+        style = Paint.Style.STROKE
+        strokeWidth = 1.6f * density
     }
 
-    function formatPopupHtml(cityName, tempText, conditionText, iconEmoji, humidityText, windText) {
-      return (
-        '<div style="min-width:155px;padding:2px 2px;">' +
-          '<div style="font-size:15px;font-weight:700;margin-bottom:4px;">' +
-            escapeHtml(iconEmoji) + ' ' + escapeHtml(cityName) + ' • <span style="color:#F59E0B;">' + escapeHtml(tempText) + '</span>' +
-          '</div>' +
-          '<div style="font-size:12px;color:#E2E8F0;margin-bottom:6px;">' + escapeHtml(conditionText) + '</div>' +
-          '<div style="font-size:11px;color:#94A3B8;">Влажность: <b style="color:#F8FAFC;">' + escapeHtml(humidityText) + '</b></div>' +
-          '<div style="font-size:11px;color:#94A3B8;">Ветер: <b style="color:#F8FAFC;">' + escapeHtml(windText) + '</b></div>' +
-        '</div>'
-      );
+    canvas.drawRoundRect(rect, radius, radius, bgPaint)
+    canvas.drawRoundRect(rect, radius, radius, borderPaint)
+
+    // Pointer triangle at bottom center
+    val cx = rect.centerX()
+    val pointerPath = AndroidPath().apply {
+        moveTo(cx - 6f * density, rect.bottom - 1f)
+        lineTo(cx, rect.bottom + pointerH)
+        lineTo(cx + 6f * density, rect.bottom - 1f)
+        close()
     }
+    canvas.drawPath(pointerPath, bgPaint)
 
-    function notifyAndroidLayerStatus() {
-      if (!window.AndroidMapBridge) return;
-      if (currentLayerKey === 'precipitation') {
-        window.AndroidMapBridge.onLayerStatus('precipitation', radarTimestamp, false);
-      } else {
-        window.AndroidMapBridge.onLayerStatus('clouds', cloudsTimestamp, cloudsIsFallback);
-      }
-    }
+    val baselineY = rect.centerY() - (tempPaint.fontMetrics.ascent + tempPaint.fontMetrics.descent) / 2f
+    var cursorX = rect.left + hPad
+    canvas.drawText(emoji, cursorX, baselineY, emojiPaint)
+    cursorX += emojiW + gap
+    canvas.drawText(temperatureText, cursorX, baselineY, tempPaint)
+    cursorX += tempW + gap
+    canvas.drawText(safeCity, cursorX, baselineY, cityPaint)
 
-    function applyActiveLayer() {
-      if (!map) return;
-      if (precipitationLayer && map.hasLayer(precipitationLayer)) {
-        map.removeLayer(precipitationLayer);
-      }
-      if (cloudsLayer && map.hasLayer(cloudsLayer)) {
-        map.removeLayer(cloudsLayer);
-      }
-      if (currentLayerKey === 'precipitation' && precipitationLayer) {
-        precipitationLayer.addTo(map);
-      } else if (currentLayerKey === 'clouds' && cloudsLayer) {
-        cloudsLayer.addTo(map);
-      }
-      notifyAndroidLayerStatus();
-    }
-
-    function buildYesterdayIsoDate() {
-      var d = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      return d.toISOString().slice(0, 10);
-    }
-
-    async function loadRainViewerLayers() {
-      try {
-        var resp = await fetch('https://api.rainviewer.com/public/weather-maps.json');
-        var data = await resp.json();
-        var host = (data && data.host) ? data.host : 'https://tilecache.rainviewer.com';
-
-        if (data && data.radar) {
-          var past = data.radar.past || [];
-          var nowcast = data.radar.nowcast || [];
-          var frame = past.length > 0 ? past[past.length - 1] : (nowcast.length > 0 ? nowcast[0] : null);
-          if (frame && frame.path) {
-            radarTimestamp = frame.time || 0;
-            var radarUrl = host + frame.path + '/256/{z}/{x}/{y}/2/1_1.png';
-            precipitationLayer = L.tileLayer(radarUrl, {
-              tileSize: 256,
-              maxNativeZoom: 7,
-              maxZoom: 18,
-              opacity: 0.74,
-              zIndex: 200,
-              attribution: '&copy; RainViewer'
-            });
-          }
-        }
-
-        if (data && data.satellite && data.satellite.infrared && data.satellite.infrared.length > 0) {
-          var satFrames = data.satellite.infrared;
-          var satFrame = satFrames[satFrames.length - 1];
-          cloudsTimestamp = satFrame.time || 0;
-          cloudsIsFallback = false;
-          var satUrl = host + satFrame.path + '/256/{z}/{x}/{y}/0/0_0.png';
-          cloudsLayer = L.tileLayer(satUrl, {
-            tileSize: 256,
-            maxNativeZoom: 7,
-            maxZoom: 18,
-            opacity: 0.65,
-            zIndex: 200,
-            attribution: '&copy; RainViewer'
-          });
-        } else {
-          // Fallback free keyless global cloud cover layer if RainViewer satellite feed is omitted
-          cloudsTimestamp = 0;
-          cloudsIsFallback = true;
-          var dateStr = buildYesterdayIsoDate();
-          var gibsUrl = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_Cloud_Top_Temp_Day/default/' +
-            dateStr + '/GoogleMapsCompatible_Level6/{z}/{y}/{x}.png';
-          cloudsLayer = L.tileLayer(gibsUrl, {
-            tileSize: 256,
-            maxNativeZoom: 6,
-            maxZoom: 18,
-            opacity: 0.60,
-            zIndex: 200,
-            attribution: '&copy; NASA GIBS'
-          });
-        }
-
-        applyActiveLayer();
-      } catch (err) {
-        console.error('RainViewer load error:', err);
-      }
-    }
-
-    function bootMap() {
-      if (map) return;
-
-      map = L.map('map', {
-        zoomControl: false,
-        attributionControl: true,
-        minZoom: 2,
-        maxZoom: 18
-      }).setView([$initialLat, $initialLon], $initialZoom);
-
-      map.attributionControl.setPosition('bottomleft');
-      map.attributionControl.setPrefix(false);
-
-      // Base OpenStreetMap layer
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 18,
-        className: 'osm-base-tiles',
-        attribution: '&copy; OpenStreetMap'
-      }).addTo(map);
-
-      // City temperature & condition marker
-      weatherMarker = L.marker([$initialLat, $initialLon], {
-        icon: createWeatherIcon($tempJson, $cityJson, $condJson, $emojiJson),
-        zIndexOffset: 500
-      }).addTo(map);
-
-      weatherMarker.bindPopup(
-        formatPopupHtml($cityJson, $tempJson, $condJson, $emojiJson, $humidityJson, $windJson),
-        { offset: [0, -34] }
-      );
-
-      map.on('zoomend', function() {
-        if (window.AndroidMapBridge) {
-          window.AndroidMapBridge.onZoomChanged(map.getZoom());
-        }
-      });
-
-      if (window.AndroidMapBridge) {
-        window.AndroidMapBridge.onMapReady();
-      }
-
-      loadRainViewerLayers();
-    }
-
-    window.setWeatherLayer = function(layerKey) {
-      currentLayerKey = layerKey;
-      applyActiveLayer();
-    };
-
-    window.zoomInMap = function() {
-      if (map) map.zoomIn();
-    };
-
-    window.zoomOutMap = function() {
-      if (map) map.zoomOut();
-    };
-
-    window.recenterOnCity = function() {
-      if (map && lastCityCoords) {
-        map.flyTo(lastCityCoords, Math.max(map.getZoom(), 6), { duration: 0.65 });
-      }
-    };
-
-    window.updateWeatherMarker = function(lat, lon, cityName, tempText, conditionText, iconEmoji, humidityText, windText) {
-      var coordsChanged = Math.abs(lastCityCoords[0] - lat) > 0.0001 || Math.abs(lastCityCoords[1] - lon) > 0.0001;
-      lastCityCoords = [lat, lon];
-      if (!map) return;
-
-      if (weatherMarker) {
-        weatherMarker.setLatLng([lat, lon]);
-        weatherMarker.setIcon(createWeatherIcon(tempText, cityName, conditionText, iconEmoji));
-        weatherMarker.setPopupContent(
-          formatPopupHtml(cityName, tempText, conditionText, iconEmoji, humidityText, windText)
-        );
-      }
-      if (coordsChanged) {
-        map.setView([lat, lon], map.getZoom());
-      }
-    };
-  </script>
-</body>
-</html>
-    """.trimIndent()
+    return BitmapDrawable(context.resources, bitmap)
 }

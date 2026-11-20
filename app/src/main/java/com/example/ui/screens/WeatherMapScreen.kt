@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,55 +20,51 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Remove
-import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.data.model.WeatherFormatters
-import com.example.ui.components.GlassCard
-import com.example.ui.components.InteractiveWeatherWebViewMap
+import com.example.ui.components.NativeOsmdroidWeatherMap
 import com.example.ui.components.WeatherMapController
-import com.example.ui.components.WeatherMapLayer
 import com.example.ui.components.WeatherMapMarkerInfo
-import com.example.ui.components.isNetworkAvailable
+import com.example.ui.components.rememberNetworkAvailability
 import com.example.ui.components.weatherConditionEmoji
 import com.example.ui.state.CityWeatherLoadState
 import com.example.ui.state.WeatherHomeUiState
-import com.example.ui.theme.AmberPrimary
 import com.example.ui.theme.CoolCyan
 import com.example.ui.theme.IceWhite
 import com.example.ui.theme.MutedText
 import com.example.ui.theme.ObsidianBg
-import com.example.ui.theme.ObsidianBorder
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
+
+private val VioletGlassBg = Color(0xDE130E26)
+private val VioletGlassBorder = Color(0x668B5CF6)
+private val VioletNeonAccent = Color(0xFFA78BFA)
 
 @Composable
 fun WeatherMapScreen(
@@ -76,7 +72,6 @@ fun WeatherMapScreen(
     onOpenCities: () -> Unit,
     onNavigateBack: () -> Unit
 ) {
-    val context = LocalContext.current
     val activeCity = uiState.savedCities.firstOrNull { it.id == uiState.selectedCityId }
         ?: uiState.savedCities.firstOrNull()
     val report = activeCity?.let { uiState.reportsByCityId[it.id] }?.let { state ->
@@ -87,12 +82,10 @@ fun WeatherMapScreen(
         }
     }
 
-    var zoom by remember { mutableIntStateOf(6) }
-    var activeLayer by remember { mutableStateOf(WeatherMapLayer.PRECIPITATION) }
-    var layerTimestampSec by remember { mutableLongStateOf(0L) }
-    var cloudsIsFallback by remember { mutableStateOf(false) }
+    var zoom by remember { mutableIntStateOf(7) }
+    var warningMessage by remember { mutableStateOf<String?>(null) }
     var mapController by remember { mutableStateOf(WeatherMapController()) }
-    var isOnline by remember { mutableStateOf(isNetworkAvailable(context)) }
+    val isOnline = rememberNetworkAvailability()
 
     val markerInfo = remember(activeCity, report, uiState.settings) {
         val lat = activeCity?.latitude ?: 55.7558
@@ -127,46 +120,22 @@ fun WeatherMapScreen(
         )
     }
 
-    val layerBadgeText = remember(activeLayer, layerTimestampSec, cloudsIsFallback) {
-        val timeLabel = if (layerTimestampSec > 0L) {
-            val fmt = SimpleDateFormat("HH:mm", Locale.forLanguageTag("ru-RU"))
-            fmt.format(Date(layerTimestampSec * 1000L))
-        } else {
-            null
-        }
-        when (activeLayer) {
-            WeatherMapLayer.PRECIPITATION -> {
-                if (timeLabel != null) "Радар RainViewer • $timeLabel" else "Радар осадков RainViewer"
-            }
-            WeatherMapLayer.CLOUDS -> {
-                when {
-                    timeLabel != null -> "Облачность RainViewer • $timeLabel"
-                    cloudsIsFallback -> "Спутник облачности • Live"
-                    else -> "Слой облачности • Live"
-                }
-            }
-        }
-    }
-
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(ObsidianBg)
     ) {
-        InteractiveWeatherWebViewMap(
+        NativeOsmdroidWeatherMap(
             markerInfo = markerInfo,
-            activeLayer = activeLayer,
-            zoom = zoom,
+            initialZoom = zoom,
+            isOnline = isOnline,
             onZoomChanged = { newZoom -> zoom = newZoom },
-            onLayerStatusChanged = { _, ts, isFallback ->
-                layerTimestampSec = ts
-                cloudsIsFallback = isFallback
-            },
+            onRadarStatusMessage = { msg -> warningMessage = msg },
             onControllerReady = { controller -> mapController = controller },
             modifier = Modifier.fillMaxSize()
         )
 
-        // Top floating header card
+        // Top floating header card + optional network/radar warning pill
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -174,10 +143,8 @@ fun WeatherMapScreen(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            GlassCard(
+            VioletGlassSurface(
                 cornerRadius = 20.dp,
-                surfaceAlpha = 0.90f,
-                amberGlow = true,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(20.dp))
@@ -244,23 +211,27 @@ fun WeatherMapScreen(
                         Text(
                             text = markerInfo.temperatureText,
                             style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                            color = AmberPrimary,
+                            color = CoolCyan,
                             modifier = Modifier.padding(start = 8.dp, end = 10.dp)
                         )
                     }
                 }
             }
 
-            if (!isOnline) {
-                GlassCard(
+            if (!isOnline || warningMessage != null) {
+                val statusText = if (!isOnline) {
+                    stringResource(R.string.map_offline_message)
+                } else {
+                    warningMessage ?: stringResource(R.string.map_tile_error_message)
+                }
+                VioletGlassSurface(
                     cornerRadius = 16.dp,
-                    surfaceAlpha = 0.92f,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -271,20 +242,20 @@ fun WeatherMapScreen(
                             Icon(
                                 imageVector = Icons.Outlined.WifiOff,
                                 contentDescription = null,
-                                tint = AmberPrimary,
+                                tint = VioletNeonAccent,
                                 modifier = Modifier.size(20.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = stringResource(R.string.map_offline_message),
+                                text = statusText,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = IceWhite
                             )
                         }
                         IconButton(
                             onClick = {
-                                isOnline = isNetworkAvailable(context)
-                                mapController.reload()
+                                warningMessage = null
+                                mapController.reloadRadar()
                             },
                             modifier = Modifier
                                 .minimumInteractiveComponentSize()
@@ -293,7 +264,7 @@ fun WeatherMapScreen(
                             Icon(
                                 imageVector = Icons.Outlined.Refresh,
                                 contentDescription = stringResource(R.string.retry_button),
-                                tint = AmberPrimary
+                                tint = VioletNeonAccent
                             )
                         }
                     }
@@ -301,75 +272,27 @@ fun WeatherMapScreen(
             }
         }
 
-        // Bottom-left layer switcher (Осадки / Облачность) + live status pill
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .navigationBarsPadding()
-                .padding(start = 16.dp, bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0xD90D121E))
-                    .border(1.dp, ObsidianBorder, RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            ) {
-                Text(
-                    text = layerBadgeText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = IceWhite.copy(alpha = 0.88f)
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xE6111623))
-                    .border(1.dp, ObsidianBorder, RoundedCornerShape(16.dp))
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                MapLayerToggleChip(
-                    label = stringResource(R.string.map_layer_precipitation),
-                    icon = Icons.Outlined.WaterDrop,
-                    selected = activeLayer == WeatherMapLayer.PRECIPITATION,
-                    accentColor = CoolCyan,
-                    tag = "map_layer_precipitation",
-                    onClick = { activeLayer = WeatherMapLayer.PRECIPITATION }
-                )
-                MapLayerToggleChip(
-                    label = stringResource(R.string.map_layer_clouds),
-                    icon = Icons.Outlined.Cloud,
-                    selected = activeLayer == WeatherMapLayer.CLOUDS,
-                    accentColor = AmberPrimary,
-                    tag = "map_layer_clouds",
-                    onClick = { activeLayer = WeatherMapLayer.CLOUDS }
-                )
-            }
-        }
-
-        // Bottom-right recenter & zoom controls (+ / -)
+        // Simple Zoom (+ / -) and Recenter buttons on bottom-right (no bottom timeline bar)
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
-                .padding(end = 16.dp, bottom = 36.dp),
+                .padding(end = 16.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            MapControlButton(
+            VioletMapControlButton(
                 onClick = { mapController.recenter() },
+                highlighted = true,
                 tag = "map_recenter"
             ) {
                 Icon(
                     imageVector = Icons.Outlined.MyLocation,
                     contentDescription = stringResource(R.string.map_recenter),
-                    tint = AmberPrimary
+                    tint = VioletNeonAccent
                 )
             }
-            MapControlButton(
+
+            VioletMapControlButton(
                 onClick = { mapController.zoomIn() },
                 tag = "map_zoom_in"
             ) {
@@ -379,7 +302,8 @@ fun WeatherMapScreen(
                     tint = IceWhite
                 )
             }
-            MapControlButton(
+
+            VioletMapControlButton(
                 onClick = { mapController.zoomOut() },
                 tag = "map_zoom_out"
             ) {
@@ -394,55 +318,35 @@ fun WeatherMapScreen(
 }
 
 @Composable
-private fun MapLayerToggleChip(
-    label: String,
-    icon: ImageVector,
-    selected: Boolean,
-    accentColor: Color,
-    tag: String,
-    onClick: () -> Unit
+private fun VioletGlassSurface(
+    modifier: Modifier = Modifier,
+    cornerRadius: Dp = 20.dp,
+    content: @Composable () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .height(44.dp)
-            .minimumInteractiveComponentSize()
-            .clip(RoundedCornerShape(12.dp))
-            .background(
-                if (selected) accentColor.copy(alpha = 0.20f) else Color.Transparent
-            )
-            .then(
-                if (selected) {
-                    Modifier.border(1.dp, accentColor.copy(alpha = 0.70f), RoundedCornerShape(12.dp))
-                } else {
-                    Modifier
-                }
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp)
-            .testTag(tag),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(cornerRadius),
+        color = VioletGlassBg,
+        border = BorderStroke(1.dp, VioletGlassBorder),
+        shadowElevation = 0.dp
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (selected) accentColor else MutedText,
-            modifier = Modifier.size(16.dp)
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-            ),
-            color = if (selected) IceWhite else MutedText,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        Box(
+            modifier = Modifier.background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0x336D28D9),
+                        Color(0x1A1E1B4B)
+                    )
+                )
+            )
+        ) {
+            content()
+        }
     }
 }
 
 @Composable
-private fun MapControlButton(
+private fun VioletMapControlButton(
     onClick: () -> Unit,
     highlighted: Boolean = false,
     tag: String,
@@ -453,10 +357,10 @@ private fun MapControlButton(
             .size(48.dp)
             .minimumInteractiveComponentSize()
             .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xE6111623))
+            .background(VioletGlassBg)
             .border(
                 1.dp,
-                if (highlighted) AmberPrimary else ObsidianBorder,
+                if (highlighted) VioletNeonAccent.copy(alpha = 0.85f) else VioletGlassBorder,
                 RoundedCornerShape(14.dp)
             )
             .clickable(onClick = onClick)
