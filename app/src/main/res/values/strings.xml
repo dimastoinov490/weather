@@ -27,4 +27,11 @@
     <string name="error_network_subtitle">Проверьте подключение к интернету и попробуйте снова</string>
     <string name="empty_cities_title">Список городов пуст</string>
     <string name="empty_cities_subtitle">Воспользуйтесь поиском выше, чтобы добавить город</string>
+    <string name="map_title">Карта погоды</string>
+    <string name="map_layer_precipitation">Осадки</string>
+    <string name="map_layer_clouds">Облачность</string>
+    <string name="map_zoom_in">Приблизить карту</string>
+    <string name="map_zoom_out">Отдалить карту</string>
+    <string name="map_recenter">Центрировать на городе</string>
+    <string name="map_offline_message">Нет подключения к сети для загрузки карты</string>
 </resources>
