@@ -1,0 +1,30 @@
+<resources>
+    <string name="app_name">Небо</string>
+    <string name="cd_search_cities">Поиск и управление городами</string>
+    <string name="cd_settings">Настройки единиц измерения</string>
+    <string name="cd_my_location">Определить текущее местоположение</string>
+    <string name="cd_refresh">Обновить прогноз</string>
+    <string name="cd_back">Назад</string>
+    <string name="cd_delete_city">Удалить город</string>
+    <string name="cd_clear_search">Очистить поиск</string>
+    <string name="cd_weather_illustration">Иллюстрация текущей погоды</string>
+    <string name="hourly_forecast_title">Почасовой прогноз</string>
+    <string name="daily_forecast_title">Прогноз на 7 дней</string>
+    <string name="feels_like_title">Ощущается</string>
+    <string name="wind_title">Ветер</string>
+    <string name="humidity_title">Влажность</string>
+    <string name="uv_index_title">УФ-индекс</string>
+    <string name="pressure_title">Давление</string>
+    <string name="air_quality_title">Качество воздуха</string>
+    <string name="sunrise_sunset_title">Восход и закат</string>
+    <string name="cities_title">Города</string>
+    <string name="search_city_hint">Поиск города (например, Казань)…</string>
+    <string name="my_location_title">Моё местоположение</string>
+    <string name="my_location_subtitle">Определить погоду по координатам</string>
+    <string name="settings_title">Настройки</string>
+    <string name="retry_button">Повторить</string>
+    <string name="error_network_title">Не удалось загрузить погоду</string>
+    <string name="error_network_subtitle">Проверьте подключение к интернету и попробуйте снова</string>
+    <string name="empty_cities_title">Список городов пуст</string>
+    <string name="empty_cities_subtitle">Воспользуйтесь поиском выше, чтобы добавить город</string>
+</resources>
