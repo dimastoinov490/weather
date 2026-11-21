@@ -155,7 +155,7 @@ fun SettingsScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Метеоданные, почасовая кривая температуры, прогноз на 7 дней и индекс качества воздуха (AQI) предоставляются Open-Meteo. Радар осадков — RainViewer и CartoDB.",
+                                text = "Метеоданные, почасовая кривая температуры, прогноз на 7 дней и индекс качества воздуха (AQI) предоставляются Open-Meteo. Карта и радар осадков — OpenStreetMap и RainViewer.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MutedText
                             )

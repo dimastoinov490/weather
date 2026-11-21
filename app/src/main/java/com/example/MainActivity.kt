@@ -242,7 +242,11 @@ class MainActivity : ComponentActivity() {
                                 WeatherMapScreen(
                                     uiState = homeState,
                                     onOpenCities = { navController.navigate(WeatherRoutes.CITIES) },
-                                    onNavigateBack = { navController.popBackStack() }
+                                    onNavigateBack = { navController.popBackStack() },
+                                    onSelectCity = viewModel::selectCity,
+                                    onRefresh = viewModel::refreshSelectedOrAll,
+                                    onDetectLocation = triggerLocationDetection,
+                                    onOpenForecastDetail = { navController.navigate(WeatherRoutes.FORECAST) }
                                 )
                             }
 

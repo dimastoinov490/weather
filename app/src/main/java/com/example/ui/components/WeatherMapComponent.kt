@@ -7,17 +7,14 @@ import android.graphics.Color as AndroidColor
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
-import android.graphics.Path as AndroidPath
-import android.graphics.RectF
-import android.graphics.Typeface
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.util.TypedValue
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -60,9 +57,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.R
 import com.example.data.remote.NetworkModule
+import com.example.ui.theme.CoolCyan
 import com.example.ui.theme.IceWhite
 import com.example.ui.theme.MutedText
-import com.example.ui.theme.ObsidianBg
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapListener
 import org.osmdroid.events.ScrollEvent
@@ -78,6 +75,18 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.TilesOverlay
 import java.io.File
 import kotlin.math.roundToInt
+
+enum class WeatherMapMode {
+    MAP,
+    FORECAST,
+    PRECIPITATION
+}
+
+data class RadarFrameInfo(
+    val timeEpochSec: Long,
+    val path: String,
+    val isNowcast: Boolean
+)
 
 data class WeatherMapMarkerInfo(
     val latitude: Double,
@@ -145,8 +154,12 @@ fun rememberNetworkAvailability(): Boolean {
 fun NativeOsmdroidWeatherMap(
     markerInfo: WeatherMapMarkerInfo,
     initialZoom: Int,
+    mapMode: WeatherMapMode,
+    isRadarEnabled: Boolean,
+    selectedRadarIndex: Int,
     isOnline: Boolean,
     onZoomChanged: (Int) -> Unit,
+    onRadarFramesLoaded: (frames: List<RadarFrameInfo>, defaultLiveIndex: Int) -> Unit,
     onRadarStatusMessage: (String?) -> Unit,
     onControllerReady: (WeatherMapController) -> Unit,
     modifier: Modifier = Modifier
@@ -154,26 +167,38 @@ fun NativeOsmdroidWeatherMap(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestZoomChanged by rememberUpdatedState(onZoomChanged)
+    val latestRadarFramesLoaded by rememberUpdatedState(onRadarFramesLoaded)
     val latestRadarStatus by rememberUpdatedState(onRadarStatusMessage)
     val latestMarkerInfo by rememberUpdatedState(markerInfo)
 
     var radarRetryTrigger by remember { mutableIntStateOf(0) }
+    var radarHost by remember { mutableStateOf("https://tilecache.rainviewer.com") }
+    var radarFrames by remember { mutableStateOf<List<RadarFrameInfo>>(emptyList()) }
+    var activeRadarPath by remember { mutableStateOf<String?>(null) }
     var activeRadarOverlay by remember { mutableStateOf<TilesOverlay?>(null) }
     var activeRadarProvider by remember { mutableStateOf<MapTileProviderBasic?>(null) }
 
-    // Configure osmdroid userAgentValue and app-private cache directory before creating MapView
+    // Configure osmdroid with a policy-compliant User-Agent and clean cache paths before MapView creation
     remember(context) {
         val osmConfig = Configuration.getInstance()
-        osmConfig.userAgentValue = context.packageName
+        val prefs = context.getSharedPreferences("osmdroid_weather_prefs", Context.MODE_PRIVATE)
+        osmConfig.load(context, prefs)
+        osmConfig.userAgentValue = "${context.packageName}/1.0 (Android; NeboWeather)"
         val cacheRoot = File(context.cacheDir, "osmdroid").apply { mkdirs() }
+        val tilesDir = File(cacheRoot, "tiles").apply { mkdirs() }
         osmConfig.osmdroidBasePath = cacheRoot
-        osmConfig.osmdroidTileCache = File(cacheRoot, "tiles").apply { mkdirs() }
+        osmConfig.osmdroidTileCache = tilesDir
+        // Purge any stale Carto tiles from earlier builds
+        runCatching { File(tilesDir, "CartoDarkMatterNavy").deleteRecursively() }
         true
     }
 
     val mapView = remember {
         MapView(context).apply {
+            setBackgroundColor(AndroidColor.parseColor("#0B1223"))
+            // Standard OpenStreetMap MAPNIK tiles (free, no API key required)
             setTileSource(TileSourceFactory.MAPNIK)
+            setUseDataConnection(true)
             setMultiTouchControls(true)
             isTilesScaledToDpi = true
             minZoomLevel = 3.0
@@ -181,21 +206,34 @@ fun NativeOsmdroidWeatherMap(
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             controller.setZoom(initialZoom.toDouble())
             controller.setCenter(GeoPoint(markerInfo.latitude, markerInfo.longitude))
+
+            // Luminance-inversion + deep-navy tint turning bright OSM Mapnik tiles into dark midnight-navy
+            // while preserving marine-blue waterways, thin slate roads, and bright crisp city labels
+            val darkNavyOsmMatrix = ColorMatrix(
+                floatArrayOf(
+                    -0.281f, -0.552f, -0.107f, 0f, 236f,
+                    -0.284f, -0.558f, -0.108f, 0f, 245f,
+                    -0.392f, -0.534f, 0.016f, 0f, 254f,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+            overlayManager.tilesOverlay.setColorFilter(ColorMatrixColorFilter(darkNavyOsmMatrix))
+            overlayManager.tilesOverlay.loadingBackgroundColor = AndroidColor.parseColor("#0B1223")
+            overlayManager.tilesOverlay.loadingLineColor = AndroidColor.parseColor("#162945")
         }
     }
 
     val cityMarker = remember(mapView) {
         Marker(mapView).apply {
-            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            icon = createGlowingUserRingDrawable(context)
         }
     }
 
-    // Track last centered city coordinates so tapping "Recenter" or switching cities moves cleanly
     var lastCenteredLatLon by remember {
         mutableStateOf(markerInfo.latitude to markerInfo.longitude)
     }
 
-    // Attach zoom listener & marker once, handle lifecycle resume/pause/detach
     DisposableEffect(mapView, lifecycleOwner) {
         if (!mapView.overlays.contains(cityMarker)) {
             mapView.overlays.add(cityMarker)
@@ -219,9 +257,14 @@ fun NativeOsmdroidWeatherMap(
                 onRecenter = {
                     val info = latestMarkerInfo
                     val target = GeoPoint(info.latitude, info.longitude)
-                    mapView.controller.animateTo(target, mapView.zoomLevelDouble.coerceAtLeast(7.0), 550L)
+                    mapView.controller.animateTo(
+                        target,
+                        mapView.zoomLevelDouble.coerceAtLeast(7.0),
+                        550L
+                    )
                 },
                 onReloadRadar = {
+                    mapView.invalidate()
                     radarRetryTrigger++
                 }
             )
@@ -246,7 +289,7 @@ fun NativeOsmdroidWeatherMap(
         }
     }
 
-    // Fetch latest RainViewer past radar frame and attach native TilesOverlay above OSM streets
+    // Fetch RainViewer past & nowcast radar frames
     LaunchedEffect(isOnline, radarRetryTrigger) {
         if (!isOnline) {
             latestRadarStatus(context.getString(R.string.map_offline_message))
@@ -255,58 +298,22 @@ fun NativeOsmdroidWeatherMap(
 
         val result = runCatching { NetworkModule.rainViewerApi.getRadarMaps() }
         result.onSuccess { response ->
-            val latestFrame = response.radar?.past?.lastOrNull()
-            if (latestFrame != null && latestFrame.path.isNotBlank()) {
-                val host = response.host.trimEnd('/')
-                val path = latestFrame.path
-                val radarTileSource = object : OnlineTileSourceBase(
-                    "RainViewer_${latestFrame.time}",
-                    0,
-                    7,
-                    256,
-                    ".png",
-                    arrayOf("$host$path/256/")
-                ) {
-                    override fun getTileURLString(pMapTileIndex: Long): String {
-                        val z = MapTileIndex.getZoom(pMapTileIndex)
-                        val x = MapTileIndex.getX(pMapTileIndex)
-                        val y = MapTileIndex.getY(pMapTileIndex)
-                        return "$host$path/256/$z/$x/$y/2/1_1.png"
-                    }
-                }
-
-                // Replace any previous radar overlay cleanly
-                activeRadarOverlay?.let { oldOverlay ->
-                    mapView.overlays.remove(oldOverlay)
-                }
-                activeRadarProvider?.detach()
-
-                val tileProvider = MapTileProviderBasic(context, radarTileSource).apply {
-                    setUseDataConnection(true)
-                }
-                val alphaMatrix = ColorMatrix().apply {
-                    setScale(1f, 1f, 1f, 0.70f)
-                }
-                val radarOverlay = TilesOverlay(tileProvider, context).apply {
-                    loadingBackgroundColor = AndroidColor.TRANSPARENT
-                    loadingLineColor = AndroidColor.TRANSPARENT
-                    setColorFilter(ColorMatrixColorFilter(alphaMatrix))
-                }
-
-                // Keep city marker on top of the radar TilesOverlay
-                val markerIndex = mapView.overlays.indexOf(cityMarker)
-                if (markerIndex >= 0) {
-                    mapView.overlays.add(markerIndex, radarOverlay)
-                } else {
-                    mapView.overlays.add(radarOverlay)
-                    mapView.overlays.add(cityMarker)
-                }
-
-                activeRadarProvider = tileProvider
-                activeRadarOverlay = radarOverlay
+            val past = response.radar?.past.orEmpty()
+                .filter { it.path.isNotBlank() }
+                .map { RadarFrameInfo(timeEpochSec = it.time, path = it.path, isNowcast = false) }
+            val nowcast = response.radar?.nowcast.orEmpty()
+                .filter { it.path.isNotBlank() }
+                .map { RadarFrameInfo(timeEpochSec = it.time, path = it.path, isNowcast = true) }
+            val allFrames = past + nowcast
+            if (allFrames.isNotEmpty()) {
+                radarHost = response.host.trimEnd('/')
+                radarFrames = allFrames
+                val defaultLiveIndex = (past.size - 1).coerceAtLeast(0)
+                latestRadarFramesLoaded(allFrames, defaultLiveIndex)
                 latestRadarStatus(null)
-                mapView.invalidate()
             } else {
+                radarFrames = emptyList()
+                latestRadarFramesLoaded(emptyList(), 0)
                 latestRadarStatus(context.getString(R.string.map_tile_error_message))
             }
         }.onFailure {
@@ -314,27 +321,101 @@ fun NativeOsmdroidWeatherMap(
         }
     }
 
-    // Update marker appearance and recenter when city or temperature updates
+    // Attach, update, or remove RainViewer precipitation overlay based on toggle, frame, and mode
+    LaunchedEffect(isRadarEnabled, radarHost, radarFrames, selectedRadarIndex, mapMode) {
+        if (!isRadarEnabled) {
+            activeRadarOverlay?.let { oldOverlay ->
+                mapView.overlays.remove(oldOverlay)
+            }
+            activeRadarProvider?.detach()
+            activeRadarPath = null
+            activeRadarOverlay = null
+            activeRadarProvider = null
+            mapView.invalidate()
+            return@LaunchedEffect
+        }
+
+        val frame = radarFrames.getOrNull(selectedRadarIndex)
+            ?: radarFrames.lastOrNull()
+            ?: return@LaunchedEffect
+
+        val targetAlpha = when (mapMode) {
+            WeatherMapMode.MAP -> 0.74f
+            WeatherMapMode.FORECAST -> 0.78f
+            WeatherMapMode.PRECIPITATION -> 0.90f
+        }
+        val radarColorFilter = ColorMatrixColorFilter(
+            ColorMatrix().apply { setScale(1f, 1.02f, 1.06f, targetAlpha) }
+        )
+
+        if (activeRadarPath == frame.path && activeRadarOverlay != null) {
+            activeRadarOverlay?.setColorFilter(radarColorFilter)
+            mapView.invalidate()
+            return@LaunchedEffect
+        }
+
+        val host = radarHost
+        val path = frame.path
+        val radarTileSource = object : OnlineTileSourceBase(
+            "RainViewer_${frame.timeEpochSec}",
+            0,
+            7,
+            256,
+            ".png",
+            arrayOf("$host$path/256/")
+        ) {
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                val z = MapTileIndex.getZoom(pMapTileIndex)
+                val x = MapTileIndex.getX(pMapTileIndex)
+                val y = MapTileIndex.getY(pMapTileIndex)
+                // Scheme 2 = Universal Blue (cyan -> blue -> purple) with smooth interpolation (1_1)
+                return "$host$path/256/$z/$x/$y/2/1_1.png"
+            }
+        }
+
+        val tileProvider = MapTileProviderBasic(context, radarTileSource).apply {
+            setUseDataConnection(true)
+        }
+        val radarOverlay = TilesOverlay(tileProvider, context).apply {
+            loadingBackgroundColor = AndroidColor.TRANSPARENT
+            loadingLineColor = AndroidColor.TRANSPARENT
+            setColorFilter(radarColorFilter)
+        }
+
+        activeRadarOverlay?.let { oldOverlay ->
+            mapView.overlays.remove(oldOverlay)
+        }
+        activeRadarProvider?.detach()
+
+        val markerIndex = mapView.overlays.indexOf(cityMarker)
+        if (markerIndex >= 0) {
+            mapView.overlays.add(markerIndex, radarOverlay)
+        } else {
+            mapView.overlays.add(radarOverlay)
+            mapView.overlays.add(cityMarker)
+        }
+
+        activeRadarPath = frame.path
+        activeRadarProvider = tileProvider
+        activeRadarOverlay = radarOverlay
+        mapView.invalidate()
+    }
+
+    // Update marker position/metadata and animate map to newly selected city
     LaunchedEffect(
         markerInfo.latitude,
         markerInfo.longitude,
         markerInfo.cityName,
         markerInfo.temperatureText,
         markerInfo.conditionText,
-        markerInfo.iconEmoji,
         markerInfo.humidityText,
         markerInfo.windText
     ) {
         val point = GeoPoint(markerInfo.latitude, markerInfo.longitude)
         cityMarker.position = point
         cityMarker.title = "${markerInfo.cityName} • ${markerInfo.temperatureText}"
-        cityMarker.snippet = "${markerInfo.conditionText} • Влажность: ${markerInfo.humidityText}, Ветер: ${markerInfo.windText}"
-        cityMarker.icon = createCityWeatherPinDrawable(
-            context = context,
-            emoji = markerInfo.iconEmoji,
-            temperatureText = markerInfo.temperatureText,
-            cityName = markerInfo.cityName
-        )
+        cityMarker.snippet =
+            "${markerInfo.conditionText} • Влажность: ${markerInfo.humidityText}, Ветер: ${markerInfo.windText}"
 
         val coordsChanged = kotlin.math.abs(lastCenteredLatLon.first - markerInfo.latitude) > 0.0001 ||
             kotlin.math.abs(lastCenteredLatLon.second - markerInfo.longitude) > 0.0001
@@ -347,7 +428,7 @@ fun NativeOsmdroidWeatherMap(
 
     Box(
         modifier = modifier
-            .background(ObsidianBg)
+            .background(Color(0xFF0B1223))
             .testTag("weather_map_native_container")
     ) {
         AndroidView(
@@ -359,13 +440,13 @@ fun NativeOsmdroidWeatherMap(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0x990A0816)),
+                    .background(Color(0x99060D1A)),
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
                     shape = RoundedCornerShape(22.dp),
-                    color = Color(0xEB151029),
-                    border = BorderStroke(1.dp, Color(0x668B5CF6)),
+                    color = Color(0xEB0B1628),
+                    border = BorderStroke(1.dp, Color(0x6638BDF8)),
                     modifier = Modifier
                         .padding(24.dp)
                         .widthIn(max = 360.dp)
@@ -377,7 +458,7 @@ fun NativeOsmdroidWeatherMap(
                         Icon(
                             imageVector = Icons.Outlined.CloudOff,
                             contentDescription = null,
-                            tint = Color(0xFFA78BFA),
+                            tint = CoolCyan,
                             modifier = Modifier.size(44.dp)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -397,7 +478,7 @@ fun NativeOsmdroidWeatherMap(
                         Button(
                             onClick = { radarRetryTrigger++ },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFF7C3AED),
+                                containerColor = Color(0xFF2563EB),
                                 contentColor = IceWhite
                             ),
                             modifier = Modifier
@@ -435,84 +516,45 @@ fun weatherConditionEmoji(weatherCode: Int, isDay: Boolean): String {
     }
 }
 
-private fun createCityWeatherPinDrawable(
-    context: Context,
-    emoji: String,
-    temperatureText: String,
-    cityName: String
-): BitmapDrawable {
+private fun createGlowingUserRingDrawable(context: Context): BitmapDrawable {
     val density = context.resources.displayMetrics.density
-    val metrics = context.resources.displayMetrics
+    val sizePx = (44f * density).roundToInt().coerceAtLeast(32)
+    val cx = sizePx / 2f
+    val cy = sizePx / 2f
 
-    val tempPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.parseColor("#38BDF8")
-        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 15f, metrics)
-        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-    }
-    val cityPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.parseColor("#F8FAFC")
-        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 13f, metrics)
-        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-    }
-    val emojiPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 15f, metrics)
-    }
-
-    val safeCity = if (cityName.length > 16) cityName.take(15) + "…" else cityName
-    val emojiW = emojiPaint.measureText(emoji)
-    val tempW = tempPaint.measureText(temperatureText)
-    val cityW = cityPaint.measureText(safeCity)
-
-    val hPad = 12f * density
-    val gap = 6f * density
-    val vPad = 8f * density
-    val pointerH = 8f * density
-    val shadowPad = 4f * density
-
-    val pillW = (hPad * 2f + emojiW + gap + tempW + gap + cityW).coerceAtLeast(96f * density)
-    val textHeight = tempPaint.fontMetrics.let { it.descent - it.ascent }
-    val pillH = textHeight + vPad * 2f
-
-    val totalW = (pillW + shadowPad * 2f).roundToInt().coerceAtLeast(1)
-    val totalH = (pillH + pointerH + shadowPad * 2f).roundToInt().coerceAtLeast(1)
-
-    val bitmap = Bitmap.createBitmap(totalW, totalH, Bitmap.Config.ARGB_8888)
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
     val canvas = AndroidCanvas(bitmap)
 
-    val rect = RectF(shadowPad, shadowPad, shadowPad + pillW, shadowPad + pillH)
-    val radius = 14f * density
+    val glowRadius = sizePx * 0.48f
+    val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = RadialGradient(
+            cx,
+            cy,
+            glowRadius,
+            intArrayOf(
+                AndroidColor.argb(185, 56, 189, 248),
+                AndroidColor.argb(95, 37, 99, 235),
+                AndroidColor.argb(0, 37, 99, 235)
+            ),
+            floatArrayOf(0.25f, 0.6f, 1f),
+            Shader.TileMode.CLAMP
+        )
+    }
+    canvas.drawCircle(cx, cy, glowRadius, glowPaint)
 
-    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.parseColor("#EB140F2A")
+    val innerRadius = 8.5f * density
+    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.argb(215, 29, 78, 216)
         style = Paint.Style.FILL
-        setShadowLayer(4f * density, 0f, 2f * density, AndroidColor.argb(140, 0, 0, 0))
     }
-    val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = AndroidColor.parseColor("#DDA78BFA")
+    canvas.drawCircle(cx, cy, innerRadius, fillPaint)
+
+    val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.WHITE
         style = Paint.Style.STROKE
-        strokeWidth = 1.6f * density
+        strokeWidth = 2.6f * density
     }
-
-    canvas.drawRoundRect(rect, radius, radius, bgPaint)
-    canvas.drawRoundRect(rect, radius, radius, borderPaint)
-
-    // Pointer triangle at bottom center
-    val cx = rect.centerX()
-    val pointerPath = AndroidPath().apply {
-        moveTo(cx - 6f * density, rect.bottom - 1f)
-        lineTo(cx, rect.bottom + pointerH)
-        lineTo(cx + 6f * density, rect.bottom - 1f)
-        close()
-    }
-    canvas.drawPath(pointerPath, bgPaint)
-
-    val baselineY = rect.centerY() - (tempPaint.fontMetrics.ascent + tempPaint.fontMetrics.descent) / 2f
-    var cursorX = rect.left + hPad
-    canvas.drawText(emoji, cursorX, baselineY, emojiPaint)
-    cursorX += emojiW + gap
-    canvas.drawText(temperatureText, cursorX, baselineY, tempPaint)
-    cursorX += tempW + gap
-    canvas.drawText(safeCity, cursorX, baselineY, cityPaint)
+    canvas.drawCircle(cx, cy, innerRadius, strokePaint)
 
     return BitmapDrawable(context.resources, bitmap)
 }

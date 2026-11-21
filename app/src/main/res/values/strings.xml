@@ -28,6 +28,22 @@
     <string name="empty_cities_title">Список городов пуст</string>
     <string name="empty_cities_subtitle">Воспользуйтесь поиском выше, чтобы добавить город</string>
     <string name="map_title">Карта осадков</string>
+    <string name="map_brand_title">Погода</string>
+    <string name="map_brand_subtitle">Прогноз и карта осадков</string>
+    <string name="map_tab_map">Карта</string>
+    <string name="map_tab_forecast">Прогноз</string>
+    <string name="map_tab_precipitation">Осадки</string>
+    <string name="map_legend_light">Слабо</string>
+    <string name="map_legend_moderate">Умеренно</string>
+    <string name="map_legend_heavy">Сильно</string>
+    <string name="map_radar_live_badge">Радар • сейчас</string>
+    <string name="map_radar_forecast_badge">Прогноз</string>
+    <string name="map_radar_no_frames">Кадры радара недоступны</string>
+    <string name="map_city_selector_cd">Выбрать город</string>
+    <string name="map_choose_other_city">Найти другой город…</string>
+    <string name="map_open_full_forecast">Подробный прогноз</string>
+    <string name="map_prev_frame">Предыдущий кадр</string>
+    <string name="map_next_frame">Следующий кадр</string>
     <string name="map_layer_precipitation">Осадки</string>
     <string name="map_layer_clouds">Облачность</string>
     <string name="map_radar_on">Осадки: вкл</string>
@@ -36,7 +52,8 @@
     <string name="map_radar_pause">Пауза анимации радара</string>
     <string name="map_zoom_in">Приблизить карту</string>
     <string name="map_zoom_out">Отдалить карту</string>
-    <string name="map_recenter">Вернуть к выбранному городу</string>
+    <string name="map_recenter">Центрировать и обновить</string>
     <string name="map_offline_message">Нет подключения к интернету. Проверьте сеть и нажмите «Повторить».</string>
     <string name="map_tile_error_message">Сервер карт или радара временно не отвечает</string>
+    <string name="map_attribution">© OpenStreetMap • RainViewer</string>
 </resources>
