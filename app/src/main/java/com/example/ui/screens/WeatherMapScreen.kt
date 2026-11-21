@@ -33,18 +33,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.model.WeatherFormatters
+import com.example.ui.components.MapBgPrimary
+import com.example.ui.components.MapBgSecondary
 import com.example.ui.components.MapBottomWeatherPanel
 import com.example.ui.components.MapControlSquareButton
-import com.example.ui.components.MapGlassSoftBg
 import com.example.ui.components.MapModeAndActionRow
-import com.example.ui.components.MapNavyBg
 import com.example.ui.components.MapStatusWarningPill
+import com.example.ui.components.MapTextSecondary
 import com.example.ui.components.MapTopHeaderRow
 import com.example.ui.components.NativeOsmdroidWeatherMap
 import com.example.ui.components.PrecipitationLegendCard
@@ -58,8 +58,6 @@ import com.example.ui.components.rememberNetworkAvailability
 import com.example.ui.components.weatherConditionEmoji
 import com.example.ui.state.CityWeatherLoadState
 import com.example.ui.state.WeatherHomeUiState
-import com.example.ui.theme.IceWhite
-import com.example.ui.theme.MutedText
 import kotlinx.coroutines.delay
 
 @Composable
@@ -141,14 +139,15 @@ fun WeatherMapScreen(
             conditionText = condText,
             iconEmoji = emoji,
             humidityText = humidityText,
-            windText = windText
+            windText = windText,
+            isCurrentLocation = activeCity?.isCurrentLocation == true
         )
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MapNavyBg)
+            .background(MapBgPrimary)
     ) {
         NativeOsmdroidWeatherMap(
             markerInfo = markerInfo,
@@ -156,6 +155,7 @@ fun WeatherMapScreen(
             mapMode = mapMode,
             isRadarEnabled = isRadarEnabled,
             selectedRadarIndex = selectedRadarIndex,
+            locationRecenterToken = uiState.locationRecenterToken,
             isOnline = isOnline,
             onZoomChanged = { newZoom -> zoom = newZoom },
             onRadarFramesLoaded = { frames, defaultIndex ->
@@ -278,16 +278,17 @@ fun WeatherMapScreen(
                         tag = "map_gps_button",
                         contentDescription = stringResource(R.string.cd_my_location),
                         icon = Icons.Outlined.MyLocation,
-                        tint = IceWhite
+                        highlighted = activeCity?.isCurrentLocation == true,
+                        isLoading = uiState.isLocating
                     )
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = MapGlassSoftBg
+                        color = MapBgSecondary.copy(alpha = 0.78f)
                     ) {
                         Text(
                             text = stringResource(R.string.map_attribution),
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.5.sp),
-                            color = MutedText.copy(alpha = 0.85f),
+                            color = MapTextSecondary,
                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                         )
                     }
@@ -298,15 +299,13 @@ fun WeatherMapScreen(
                         onClick = { mapController.zoomIn() },
                         tag = "map_zoom_in",
                         contentDescription = stringResource(R.string.map_zoom_in),
-                        icon = Icons.Outlined.Add,
-                        tint = IceWhite
+                        icon = Icons.Outlined.Add
                     )
                     MapControlSquareButton(
                         onClick = { mapController.zoomOut() },
                         tag = "map_zoom_out",
                         contentDescription = stringResource(R.string.map_zoom_out),
-                        icon = Icons.Outlined.Remove,
-                        tint = IceWhite
+                        icon = Icons.Outlined.Remove
                     )
                 }
             }

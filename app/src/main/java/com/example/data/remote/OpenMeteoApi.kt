@@ -2,6 +2,7 @@ package com.example.data.remote
 
 import com.example.data.model.AirQualityResponse
 import com.example.data.model.GeocodingResponse
+import com.example.data.model.NominatimReverseResponse
 import com.example.data.model.OpenMeteoForecastResponse
 import com.example.data.model.RainViewerMapsResponse
 import com.squareup.moshi.Moshi
@@ -11,6 +12,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
@@ -48,6 +50,18 @@ interface GeocodingApiService {
         @Query("language") language: String = "ru",
         @Query("format") format: String = "json"
     ): GeocodingResponse
+}
+
+interface NominatimApiService {
+    @GET("reverse")
+    suspend fun reverseGeocode(
+        @Query("lat") latitude: Double,
+        @Query("lon") longitude: Double,
+        @Query("format") format: String = "jsonv2",
+        @Query("accept-language") language: String = "ru",
+        @Query("zoom") zoom: Int = 10,
+        @Header("User-Agent") userAgent: String = "NeboWeatherAndroid/1.0"
+    ): NominatimReverseResponse
 }
 
 interface RainViewerApiService {
@@ -99,6 +113,15 @@ object NetworkModule {
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
             .create(GeocodingApiService::class.java)
+    }
+
+    val nominatimApi: NominatimApiService by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://nominatim.openstreetmap.org/")
+            .client(okHttpClient)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+            .create(NominatimApiService::class.java)
     }
 
     val rainViewerApi: RainViewerApiService by lazy {

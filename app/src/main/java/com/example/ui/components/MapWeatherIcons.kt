@@ -24,16 +24,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.example.data.model.WeatherMapper
 import com.example.data.model.WeatherMood
-import com.example.ui.theme.CoolCyan
-import com.example.ui.theme.SkyBluePrimary
-import com.example.ui.theme.SunGold
-import com.example.ui.theme.SunWarmAmber
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Top-left brand badge matching the glowing blue raincloud tile in the radar map header.
+ * Top-left brand badge matching the dark-blue glass raincloud tile in the radar map header.
  */
 @Composable
 fun MapAppBrandIcon(
@@ -45,10 +41,10 @@ fun MapAppBrandIcon(
             .clip(shape)
             .background(
                 Brush.linearGradient(
-                    colors = listOf(Color(0xFF13294B), Color(0xFF0A162C))
+                    colors = listOf(Color(0xFF173D70), Color(0xFF0B1930))
                 )
             )
-            .border(1.dp, Color(0x5538BDF8), shape)
+            .border(1.dp, Color(0xFF2478D4), shape)
             .padding(6.dp)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -58,7 +54,7 @@ fun MapAppBrandIcon(
 }
 
 /**
- * Luminous weather icon designed for the dark-navy translucent map weather panel and hourly strip.
+ * Luminous dark-blue atmospheric weather icon for the map weather panel and hourly strip.
  */
 @Composable
 fun MapGlowingWeatherIcon(
@@ -81,14 +77,26 @@ fun MapGlowingWeatherIcon(
             WeatherMood.SNOW -> drawGlowingSnowIcon()
             WeatherMood.OVERCAST -> drawBlueCloudOnly(yOffset = 0.06f, glow = true)
             WeatherMood.FOG -> drawGlowingFogIcon()
-            WeatherMood.CLEAR_DAY -> drawGlowingSunIcon(center = Offset(size.width * 0.5f, size.height * 0.5f), radius = size.width * 0.27f)
-            WeatherMood.CLEAR_NIGHT -> drawGlowingMoonIcon(center = Offset(size.width * 0.5f, size.height * 0.5f), radius = size.width * 0.27f)
+            WeatherMood.CLEAR_DAY -> drawGlowingClearOrb(
+                center = Offset(size.width * 0.5f, size.height * 0.5f),
+                radius = size.width * 0.27f
+            )
+            WeatherMood.CLEAR_NIGHT -> drawGlowingMoonIcon(
+                center = Offset(size.width * 0.5f, size.height * 0.5f),
+                radius = size.width * 0.27f
+            )
             WeatherMood.PARTLY_CLOUDY_DAY -> {
-                drawGlowingSunIcon(center = Offset(size.width * 0.66f, size.height * 0.32f), radius = size.width * 0.18f)
+                drawGlowingClearOrb(
+                    center = Offset(size.width * 0.66f, size.height * 0.32f),
+                    radius = size.width * 0.18f
+                )
                 drawBlueCloudOnly(yOffset = 0.12f, glow = false)
             }
             WeatherMood.PARTLY_CLOUDY_NIGHT -> {
-                drawGlowingMoonIcon(center = Offset(size.width * 0.66f, size.height * 0.30f), radius = size.width * 0.18f)
+                drawGlowingMoonIcon(
+                    center = Offset(size.width * 0.66f, size.height * 0.30f),
+                    radius = size.width * 0.18f
+                )
                 drawBlueCloudOnly(yOffset = 0.12f, glow = false)
             }
         }
@@ -101,7 +109,7 @@ private fun DrawScope.drawGlowingRainIcon(glow: Boolean) {
     if (glow) {
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0x5538BDF8), Color.Transparent),
+                colors = listOf(Color(0x66369BFF), Color.Transparent),
                 center = Offset(w * 0.5f, h * 0.42f),
                 radius = w * 0.56f
             ),
@@ -112,13 +120,12 @@ private fun DrawScope.drawGlowingRainIcon(glow: Boolean) {
 
     drawCyanCloud(topLeft = Offset(w * 0.10f, h * 0.14f), cloudW = w * 0.80f, cloudH = h * 0.48f)
 
-    // Three slanted rain drops matching the screenshot's glowing cyan drops
     val dropXs = listOf(0.32f, 0.50f, 0.68f)
     dropXs.forEachIndexed { index, xf ->
         val startY = h * (0.68f + if (index == 1) 0.02f else 0f)
         val endY = startY + h * 0.16f
         drawLine(
-            color = CoolCyan,
+            color = MapGlowSecondary,
             start = Offset(w * xf, startY),
             end = Offset(w * (xf - 0.08f), endY),
             strokeWidth = (w * 0.085f).coerceAtLeast(2.2f),
@@ -132,7 +139,7 @@ private fun DrawScope.drawGlowingStormIcon() {
     val h = size.height
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(Color(0x4560A5FA), Color.Transparent),
+            colors = listOf(Color(0x55369BFF), Color.Transparent),
             center = Offset(w * 0.5f, h * 0.42f),
             radius = w * 0.56f
         ),
@@ -149,7 +156,7 @@ private fun DrawScope.drawGlowingStormIcon() {
         lineTo(w * 0.52f, h * 0.68f)
         close()
     }
-    drawPath(bolt, color = SunWarmAmber)
+    drawPath(bolt, color = Color(0xFFE0F2FE))
 }
 
 private fun DrawScope.drawGlowingSnowIcon() {
@@ -177,7 +184,7 @@ private fun DrawScope.drawGlowingFogIcon() {
     listOf(0.68f to 0.64f, 0.80f to 0.48f).forEach { (yf, span) ->
         val startX = w * (0.5f - span / 2f)
         drawLine(
-            color = Color(0xFFBFE4FF),
+            color = MapTextSecondary,
             start = Offset(startX, h * yf),
             end = Offset(startX + w * span, h * yf),
             strokeWidth = (w * 0.075f).coerceAtLeast(2.2f),
@@ -192,7 +199,7 @@ private fun DrawScope.drawBlueCloudOnly(yOffset: Float, glow: Boolean) {
     if (glow) {
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0x4560A5FA), Color.Transparent),
+                colors = listOf(Color(0x50369BFF), Color.Transparent),
                 center = Offset(w * 0.5f, h * (0.48f + yOffset)),
                 radius = w * 0.54f
             ),
@@ -207,10 +214,10 @@ private fun DrawScope.drawBlueCloudOnly(yOffset: Float, glow: Boolean) {
     )
 }
 
-private fun DrawScope.drawGlowingSunIcon(center: Offset, radius: Float) {
+private fun DrawScope.drawGlowingClearOrb(center: Offset, radius: Float) {
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(Color(0x55FBBF24), Color.Transparent),
+            colors = listOf(Color(0x6065B8FF), Color.Transparent),
             center = center,
             radius = radius * 2.1f
         ),
@@ -220,7 +227,7 @@ private fun DrawScope.drawGlowingSunIcon(center: Offset, radius: Float) {
     for (i in 0 until 8) {
         val ang = i * 2.0 * PI / 8.0
         drawLine(
-            color = SunGold,
+            color = MapGlowSecondary,
             start = Offset(
                 center.x + cos(ang).toFloat() * radius * 1.32f,
                 center.y + sin(ang).toFloat() * radius * 1.32f
@@ -235,7 +242,7 @@ private fun DrawScope.drawGlowingSunIcon(center: Offset, radius: Float) {
     }
     drawCircle(
         brush = Brush.linearGradient(
-            colors = listOf(Color(0xFFFEF08A), SunGold, SunWarmAmber),
+            colors = listOf(Color(0xFFFFFFFF), MapGlowSecondary, MapAccentPrimary),
             start = Offset(center.x - radius, center.y - radius),
             end = Offset(center.x + radius, center.y + radius)
         ),
@@ -247,7 +254,7 @@ private fun DrawScope.drawGlowingSunIcon(center: Offset, radius: Float) {
 private fun DrawScope.drawGlowingMoonIcon(center: Offset, radius: Float) {
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(Color(0x45BAE6FD), Color.Transparent),
+            colors = listOf(Color(0x5065B8FF), Color.Transparent),
             center = center,
             radius = radius * 2f
         ),
@@ -271,7 +278,7 @@ private fun DrawScope.drawGlowingMoonIcon(center: Offset, radius: Float) {
     drawPath(
         path = moonPath,
         brush = Brush.linearGradient(
-            colors = listOf(Color(0xFFF8FAFC), Color(0xFFBAE6FD), SkyBluePrimary),
+            colors = listOf(Color(0xFFFFFFFF), MapGlowSecondary, MapAccentPrimary),
             start = Offset(center.x - radius, center.y - radius),
             end = Offset(center.x + radius, center.y + radius)
         )
@@ -285,9 +292,9 @@ private fun DrawScope.drawCyanCloud(
 ) {
     val brush = Brush.verticalGradient(
         colors = listOf(
-            Color(0xFFA5E3FF),
-            Color(0xFF4FB3FF),
-            Color(0xFF2563EB)
+            Color(0xFFBFE4FF),
+            MapGlowSecondary,
+            MapActiveGlow
         ),
         startY = topLeft.y,
         endY = topLeft.y + cloudH

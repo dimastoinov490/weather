@@ -3,6 +3,7 @@ package com.example.data.local
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -39,6 +40,7 @@ class WeatherPreferencesRepository(private val context: Context) {
         private val KEY_WIND_UNIT = stringPreferencesKey("wind_unit")
         private val KEY_PRESSURE_UNIT = stringPreferencesKey("pressure_unit")
         private val KEY_CACHED_REPORTS = stringPreferencesKey("cached_reports_json")
+        private val KEY_LOCATION_PROMPTED = booleanPreferencesKey("location_permission_prompted")
 
         val DEFAULT_CITIES = listOf(
             SavedCity(
@@ -144,6 +146,16 @@ class WeatherPreferencesRepository(private val context: Context) {
             }?.toMutableMap() ?: mutableMapOf()
             currentMap[report.city.id] = report
             prefs[KEY_CACHED_REPORTS] = reportMapAdapter.toJson(currentMap)
+        }
+    }
+
+    val hasPromptedLocationFlow: Flow<Boolean> = context.weatherDataStore.data.map { prefs ->
+        prefs[KEY_LOCATION_PROMPTED] ?: false
+    }
+
+    suspend fun markLocationPermissionPrompted() {
+        context.weatherDataStore.edit { prefs ->
+            prefs[KEY_LOCATION_PROMPTED] = true
         }
     }
 }

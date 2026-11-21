@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.WaterDrop
 import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material.icons.rounded.NearMe
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -43,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -57,9 +59,6 @@ import com.example.data.model.SavedCity
 import com.example.data.model.WeatherFormatters
 import com.example.data.model.WeatherSettings
 import com.example.ui.state.CityWeatherLoadState
-import com.example.ui.theme.CoolCyan
-import com.example.ui.theme.IceWhite
-import com.example.ui.theme.MutedText
 
 @Composable
 fun MapTopHeaderRow(
@@ -87,8 +86,8 @@ fun MapTopHeaderRow(
                     .size(40.dp)
                     .minimumInteractiveComponentSize()
                     .clip(CircleShape)
-                    .background(MapGlassSoftBg)
-                    .border(1.dp, MapGlassBorder, CircleShape)
+                    .background(MapSurfaceButton)
+                    .border(1.dp, MapElementBorder, CircleShape)
                     .clickable(onClick = onNavigateBack)
                     .testTag("map_back_button"),
                 contentAlignment = Alignment.Center
@@ -96,7 +95,7 @@ fun MapTopHeaderRow(
                 Icon(
                     imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                     contentDescription = stringResource(R.string.cd_back),
-                    tint = IceWhite,
+                    tint = MapTextPrimary,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -112,14 +111,14 @@ fun MapTopHeaderRow(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 20.sp
                     ),
-                    color = IceWhite,
+                    color = MapTextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = stringResource(R.string.map_brand_subtitle),
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
-                    color = MutedText,
+                    color = MapTextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -129,10 +128,15 @@ fun MapTopHeaderRow(
         Spacer(modifier = Modifier.width(8.dp))
 
         Box {
+            val citySelected = activeCity?.isCurrentLocation == true
             Surface(
                 shape = RoundedCornerShape(24.dp),
-                color = MapGlassBg,
-                border = BorderStroke(1.dp, MapGlassBorder),
+                color = if (citySelected) MapActiveTabBg else MapSurfaceButton,
+                border = BorderStroke(
+                    1.dp,
+                    if (citySelected) MapActiveGlow else MapElementBorder
+                ),
+                shadowElevation = if (citySelected) 6.dp else 2.dp,
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
                     .clip(RoundedCornerShape(24.dp))
@@ -146,7 +150,7 @@ fun MapTopHeaderRow(
                     Icon(
                         imageVector = Icons.Rounded.NearMe,
                         contentDescription = null,
-                        tint = IceWhite,
+                        tint = if (citySelected) MapGlowSecondary else MapAccentPrimary,
                         modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
@@ -156,7 +160,7 @@ fun MapTopHeaderRow(
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.Medium
                         ),
-                        color = IceWhite,
+                        color = MapTextPrimary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.widthIn(max = 118.dp)
@@ -165,7 +169,7 @@ fun MapTopHeaderRow(
                     Icon(
                         imageVector = Icons.Outlined.KeyboardArrowDown,
                         contentDescription = stringResource(R.string.map_city_selector_cd),
-                        tint = MutedText,
+                        tint = MapTextSecondary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -174,7 +178,7 @@ fun MapTopHeaderRow(
             DropdownMenu(
                 expanded = showCityMenu,
                 onDismissRequest = { onToggleCityMenu(false) },
-                containerColor = Color(0xF50B1628)
+                containerColor = MapBgSecondary
             ) {
                 savedCities.forEach { city ->
                     val cityReport = when (val st = reportsByCityId[city.id]) {
@@ -187,10 +191,15 @@ fun MapTopHeaderRow(
                     }.orEmpty()
                     val isSelected = city.id == activeCity?.id
                     DropdownMenuItem(
+                        modifier = if (isSelected) {
+                            Modifier.background(MapActiveTabBg.copy(alpha = 0.7f))
+                        } else {
+                            Modifier
+                        },
                         text = {
                             Text(
                                 text = "${city.name}$tempSuffix",
-                                color = if (isSelected) MapAmberText else IceWhite,
+                                color = if (isSelected) MapGlowSecondary else MapTextPrimary,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                             )
                         },
@@ -198,20 +207,20 @@ fun MapTopHeaderRow(
                     )
                 }
                 if (savedCities.isNotEmpty()) {
-                    HorizontalDivider(color = MapGlassBorder)
+                    HorizontalDivider(color = MapElementBorder)
                 }
                 DropdownMenuItem(
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Outlined.Search,
                             contentDescription = null,
-                            tint = CoolCyan
+                            tint = MapAccentPrimary
                         )
                     },
                     text = {
                         Text(
                             text = stringResource(R.string.map_choose_other_city),
-                            color = CoolCyan
+                            color = MapAccentPrimary
                         )
                     },
                     onClick = onOpenCities
@@ -269,7 +278,7 @@ fun MapModeAndActionRow(
             tag = "map_recenter",
             contentDescription = stringResource(R.string.map_recenter),
             icon = Icons.Rounded.NearMe,
-            tint = IceWhite
+            highlighted = false
         )
     }
 }
@@ -282,16 +291,30 @@ private fun MapModeTabPill(
     tag: String,
     onClick: () -> Unit
 ) {
-    val bgColor = if (selected) MapAmberBg else MapGlassSoftBg
-    val borderColor = if (selected) MapAmberBorder else MapGlassBorder
-    val contentColor = if (selected) MapAmberText else IceWhite
+    val bgColor = if (selected) MapActiveTabBg else MapSurfaceButton
+    val borderColor = if (selected) MapActiveGlow else MapElementBorder
+    val iconColor = if (selected) MapGlowSecondary else MapTextSecondary
+    val textColor = if (selected) MapTextPrimary else MapTextSecondary
 
     Surface(
         shape = RoundedCornerShape(22.dp),
         color = bgColor,
         border = BorderStroke(1.dp, borderColor),
+        shadowElevation = if (selected) 8.dp else 2.dp,
         modifier = Modifier
             .minimumInteractiveComponentSize()
+            .then(
+                if (selected) {
+                    Modifier.shadow(
+                        elevation = 10.dp,
+                        shape = RoundedCornerShape(22.dp),
+                        ambientColor = MapAccentPrimary,
+                        spotColor = MapAccentPrimary
+                    )
+                } else {
+                    Modifier
+                }
+            )
             .clip(RoundedCornerShape(22.dp))
             .clickable(onClick = onClick)
             .testTag(tag)
@@ -303,7 +326,7 @@ private fun MapModeTabPill(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = contentColor,
+                tint = iconColor,
                 modifier = Modifier.size(16.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
@@ -313,7 +336,7 @@ private fun MapModeTabPill(
                     fontSize = 13.sp,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
                 ),
-                color = contentColor,
+                color = textColor,
                 maxLines = 1
             )
         }
@@ -325,8 +348,8 @@ fun PrecipitationLegendCard(modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(14.dp),
-        color = MapGlassBg,
-        border = BorderStroke(1.dp, MapGlassBorder)
+        color = MapGlassPanel,
+        border = BorderStroke(1.dp, MapElementBorder)
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
@@ -350,17 +373,17 @@ fun PrecipitationLegendCard(modifier: Modifier = Modifier) {
                 Text(
                     text = stringResource(R.string.map_legend_light),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                    color = IceWhite.copy(alpha = 0.88f)
+                    color = MapTextPrimary.copy(alpha = 0.92f)
                 )
                 Text(
                     text = stringResource(R.string.map_legend_moderate),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                    color = IceWhite.copy(alpha = 0.88f)
+                    color = MapTextPrimary.copy(alpha = 0.92f)
                 )
                 Text(
                     text = stringResource(R.string.map_legend_heavy),
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                    color = IceWhite.copy(alpha = 0.88f)
+                    color = MapTextPrimary.copy(alpha = 0.92f)
                 )
             }
         }
@@ -377,7 +400,8 @@ fun RadarLayerToggleChip(
     val timeText = remember(frame?.timeEpochSec) {
         frame?.let { formatEpochHm(it.timeEpochSec) }
     }
-    val borderColor = if (isEnabled) CoolCyan.copy(alpha = 0.65f) else MapGlassBorder
+    val bgColor = if (isEnabled) MapActiveTabBg else MapSurfaceButton
+    val borderColor = if (isEnabled) MapActiveGlow else MapElementBorder
     val label = when {
         !isEnabled -> stringResource(R.string.map_radar_off)
         showTime && frame != null && timeText != null -> {
@@ -392,8 +416,9 @@ fun RadarLayerToggleChip(
 
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = if (isEnabled) MapGlassBg else MapGlassSoftBg,
+        color = bgColor,
         border = BorderStroke(1.dp, borderColor),
+        shadowElevation = if (isEnabled) 6.dp else 2.dp,
         modifier = Modifier
             .minimumInteractiveComponentSize()
             .clip(RoundedCornerShape(14.dp))
@@ -410,9 +435,9 @@ fun RadarLayerToggleChip(
                     .clip(CircleShape)
                     .background(
                         when {
-                            !isEnabled -> MutedText.copy(alpha = 0.55f)
-                            frame?.isNowcast == true -> MapAmberText
-                            else -> CoolCyan
+                            !isEnabled -> MapTextSecondary.copy(alpha = 0.55f)
+                            frame?.isNowcast == true -> MapGlowSecondary
+                            else -> MapAccentPrimary
                         }
                     )
             )
@@ -420,7 +445,7 @@ fun RadarLayerToggleChip(
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
-                color = if (isEnabled) IceWhite else MutedText,
+                color = if (isEnabled) MapTextPrimary else MapTextSecondary,
                 maxLines = 1
             )
         }
@@ -434,8 +459,8 @@ fun MapStatusWarningPill(
 ) {
     Surface(
         shape = RoundedCornerShape(14.dp),
-        color = MapGlassBg,
-        border = BorderStroke(1.dp, MapAmberBorder.copy(alpha = 0.65f)),
+        color = MapBgSecondary,
+        border = BorderStroke(1.dp, MapActiveGlow),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -452,14 +477,14 @@ fun MapStatusWarningPill(
                 Icon(
                     imageVector = Icons.Outlined.WifiOff,
                     contentDescription = null,
-                    tint = MapAmberText,
+                    tint = MapGlowSecondary,
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = IceWhite
+                    color = MapTextPrimary
                 )
             }
             IconButton(
@@ -471,7 +496,7 @@ fun MapStatusWarningPill(
                 Icon(
                     imageVector = Icons.Outlined.Refresh,
                     contentDescription = stringResource(R.string.retry_button),
-                    tint = CoolCyan
+                    tint = MapAccentPrimary
                 )
             }
         }
@@ -484,25 +509,50 @@ fun MapControlSquareButton(
     tag: String,
     contentDescription: String,
     icon: ImageVector,
-    tint: Color
+    highlighted: Boolean = false,
+    isLoading: Boolean = false
 ) {
     val shape = RoundedCornerShape(14.dp)
+    val bgColor = if (highlighted) MapActiveTabBg else MapSurfaceButton
+    val borderColor = if (highlighted) MapActiveGlow else MapElementBorder
+    val iconTint = if (highlighted) MapGlowSecondary else MapTextPrimary
+
     Box(
         modifier = Modifier
             .size(46.dp)
             .minimumInteractiveComponentSize()
+            .then(
+                if (highlighted) {
+                    Modifier.shadow(
+                        elevation = 8.dp,
+                        shape = shape,
+                        ambientColor = MapAccentPrimary,
+                        spotColor = MapAccentPrimary
+                    )
+                } else {
+                    Modifier
+                }
+            )
             .clip(shape)
-            .background(MapGlassBg)
-            .border(1.dp, MapGlassBorder, shape)
-            .clickable(onClick = onClick)
+            .background(bgColor)
+            .border(1.dp, borderColor, shape)
+            .clickable(enabled = !isLoading, onClick = onClick)
             .testTag(tag),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = tint,
-            modifier = Modifier.size(21.dp)
-        )
+        if (isLoading) {
+            CircularProgressIndicator(
+                color = MapGlowSecondary,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(20.dp)
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = iconTint,
+                modifier = Modifier.size(21.dp)
+            )
+        }
     }
 }

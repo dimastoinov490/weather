@@ -58,8 +58,10 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -124,12 +126,30 @@ class MainActivity : ComponentActivity() {
                 val snackbarHostState = remember { SnackbarHostState() }
                 val scope = rememberCoroutineScope()
 
+                var isStartupLocationPrompt by remember { mutableStateOf(false) }
+
+                fun hasAnyLocationPermission(): Boolean {
+                    val fineGranted = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    val coarseGranted = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    return fineGranted || coarseGranted
+                }
+
                 val locationPermissionLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.RequestPermission()
-                ) { granted ->
-                    if (granted) {
-                        viewModel.detectCurrentLocation()
-                    } else {
+                    contract = ActivityResultContracts.RequestMultiplePermissions()
+                ) { permissions ->
+                    val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+                    val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+                    val silent = isStartupLocationPrompt
+                    isStartupLocationPrompt = false
+                    if (fineGranted || coarseGranted || hasAnyLocationPermission()) {
+                        viewModel.detectCurrentLocation(silentOnStartup = silent)
+                    } else if (!silent) {
                         scope.launch {
                             snackbarHostState.showSnackbar(
                                 "Разрешите доступ к геолокации, чтобы определять погоду рядом с вами"
@@ -139,14 +159,32 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val triggerLocationDetection = {
-                    val hasPermission = ContextCompat.checkSelfPermission(
-                        context,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    ) == PackageManager.PERMISSION_GRANTED
-                    if (hasPermission) {
-                        viewModel.detectCurrentLocation()
+                    if (hasAnyLocationPermission()) {
+                        viewModel.detectCurrentLocation(silentOnStartup = false)
                     } else {
-                        locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+                        isStartupLocationPrompt = false
+                        viewModel.markLocationPermissionPrompted()
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
+                }
+
+                LaunchedEffect(Unit) {
+                    if (hasAnyLocationPermission()) {
+                        viewModel.detectCurrentLocation(silentOnStartup = true)
+                    } else if (!viewModel.hasPromptedLocationPermission()) {
+                        viewModel.markLocationPermissionPrompted()
+                        isStartupLocationPrompt = true
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
                     }
                 }
 

@@ -57,22 +57,25 @@ import com.example.data.model.WeatherFormatters
 import com.example.data.model.WeatherMapper
 import com.example.data.model.WeatherReport
 import com.example.data.model.WeatherSettings
-import com.example.ui.theme.CoolCyan
-import com.example.ui.theme.IceWhite
-import com.example.ui.theme.MutedText
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
-internal val MapNavyBg = Color(0xFF07101F)
-internal val MapGlassBg = Color(0xD40B1629)
-internal val MapGlassSoftBg = Color(0xBA0C182D)
-internal val MapGlassBorder = Color(0x404B6B94)
-internal val MapPanelBorder = Color(0x30FFFFFF)
-internal val MapAmberBg = Color(0x38F59E0B)
-internal val MapAmberBorder = Color(0xFFF59E0B)
-internal val MapAmberText = Color(0xFFFBBF24)
+// Unified Dark-Blue Map Color System
+internal val MapBgPrimary = Color(0xFF07111F)
+internal val MapBgSecondary = Color(0xFF0B1930)
+internal val MapGlassPanel = Color(0xE00B1930)
+internal val MapSurfaceButton = Color(0xE6102442)
+internal val MapActiveTabBg = Color(0xF0173D70)
+internal val MapActiveGlow = Color(0xFF2478D4)
+internal val MapAccentPrimary = Color(0xFF369BFF)
+internal val MapGlowSecondary = Color(0xFF65B8FF)
+internal val MapTextPrimary = Color(0xFFFFFFFF)
+internal val MapTextSecondary = Color(0xFFA9BCD6)
+internal val MapElementBorder = Color(0xFF203858)
+
+// Precipitation intensity colors (unchanged: Cyan -> Blue -> Purple)
 internal val MapRadarCyan = Color(0xFF38BDF8)
 internal val MapRadarBlue = Color(0xFF2563EB)
 internal val MapRadarPurple = Color(0xFF7C3AED)
@@ -88,8 +91,9 @@ fun RadarTimelineBar(
 ) {
     Surface(
         shape = RoundedCornerShape(18.dp),
-        color = MapGlassBg,
-        border = BorderStroke(1.dp, MapPanelBorder),
+        color = MapGlassPanel,
+        border = BorderStroke(1.dp, MapElementBorder),
+        shadowElevation = 6.dp,
         modifier = Modifier
             .fillMaxWidth()
             .testTag("map_radar_timeline")
@@ -105,7 +109,7 @@ fun RadarTimelineBar(
                 Text(
                     text = stringResource(R.string.map_radar_no_frames),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MutedText
+                    color = MapTextSecondary
                 )
                 IconButton(
                     onClick = onRetry,
@@ -114,7 +118,7 @@ fun RadarTimelineBar(
                     Icon(
                         imageVector = Icons.Outlined.Refresh,
                         contentDescription = stringResource(R.string.retry_button),
-                        tint = CoolCyan
+                        tint = MapAccentPrimary
                     )
                 }
             }
@@ -144,7 +148,7 @@ fun RadarTimelineBar(
                         } else {
                             stringResource(R.string.map_radar_play)
                         },
-                        tint = MapAmberText
+                        tint = MapGlowSecondary
                     )
                 }
 
@@ -158,7 +162,7 @@ fun RadarTimelineBar(
                     Icon(
                         imageVector = Icons.Outlined.SkipPrevious,
                         contentDescription = stringResource(R.string.map_prev_frame),
-                        tint = IceWhite
+                        tint = MapTextPrimary
                     )
                 }
 
@@ -168,9 +172,9 @@ fun RadarTimelineBar(
                     valueRange = 0f..(frames.lastIndex.coerceAtLeast(1)).toFloat(),
                     steps = (frames.size - 2).coerceAtLeast(0),
                     colors = SliderDefaults.colors(
-                        thumbColor = MapAmberText,
-                        activeTrackColor = CoolCyan,
-                        inactiveTrackColor = Color(0x40FFFFFF)
+                        thumbColor = MapGlowSecondary,
+                        activeTrackColor = MapAccentPrimary,
+                        inactiveTrackColor = MapElementBorder
                     ),
                     modifier = Modifier
                         .weight(1f)
@@ -187,7 +191,7 @@ fun RadarTimelineBar(
                     Icon(
                         imageVector = Icons.Outlined.SkipNext,
                         contentDescription = stringResource(R.string.map_next_frame),
-                        tint = IceWhite
+                        tint = MapTextPrimary
                     )
                 }
 
@@ -198,12 +202,12 @@ fun RadarTimelineBar(
                     Text(
                         text = timeLabel,
                         style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                        color = IceWhite
+                        color = MapTextPrimary
                     )
                     Text(
                         text = if (currentFrame.isNowcast) "Прогноз" else "Радар",
                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                        color = if (currentFrame.isNowcast) MapAmberText else CoolCyan
+                        color = if (currentFrame.isNowcast) MapGlowSecondary else MapAccentPrimary
                     )
                 }
             }
@@ -237,8 +241,9 @@ fun MapBottomWeatherPanel(
 
     Surface(
         shape = RoundedCornerShape(24.dp),
-        color = MapGlassBg,
-        border = BorderStroke(1.dp, MapPanelBorder),
+        color = MapGlassPanel,
+        border = BorderStroke(1.dp, MapElementBorder),
+        shadowElevation = 8.dp,
         modifier = Modifier
             .fillMaxWidth()
             .testTag("map_bottom_weather_panel")
@@ -246,7 +251,7 @@ fun MapBottomWeatherPanel(
         Box(
             modifier = Modifier.background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0x241B355E), Color(0x14081222))
+                    colors = listOf(Color(0x33173D70), Color(0x1407111F))
                 )
             )
         ) {
@@ -278,7 +283,7 @@ fun MapBottomWeatherPanel(
                                 fontSize = 36.sp,
                                 fontWeight = FontWeight.Light
                             ),
-                            color = IceWhite
+                            color = MapTextPrimary
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
@@ -288,7 +293,7 @@ fun MapBottomWeatherPanel(
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Medium
                                 ),
-                                color = IceWhite,
+                                color = MapTextPrimary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -302,7 +307,7 @@ fun MapBottomWeatherPanel(
                             Text(
                                 text = secondaryText,
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
-                                color = MutedText,
+                                color = MapTextSecondary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -314,7 +319,7 @@ fun MapBottomWeatherPanel(
                             .padding(horizontal = 10.dp)
                             .width(1.dp)
                             .height(48.dp)
-                            .background(Color(0x28FFFFFF))
+                            .background(MapElementBorder)
                     )
 
                     Column(
@@ -339,7 +344,7 @@ fun MapBottomWeatherPanel(
                                 Icon(
                                     imageVector = Icons.Outlined.Air,
                                     contentDescription = stringResource(R.string.wind_title),
-                                    tint = MutedText,
+                                    tint = MapTextSecondary,
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -353,7 +358,7 @@ fun MapBottomWeatherPanel(
                                 Text(
                                     text = windLabel,
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp),
-                                    color = IceWhite,
+                                    color = MapTextPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -361,7 +366,7 @@ fun MapBottomWeatherPanel(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Outlined.KeyboardArrowRight,
                                 contentDescription = stringResource(R.string.map_open_full_forecast),
-                                tint = MutedText,
+                                tint = MapGlowSecondary,
                                 modifier = Modifier.size(16.dp)
                             )
                         }
@@ -370,14 +375,14 @@ fun MapBottomWeatherPanel(
                             Icon(
                                 imageVector = Icons.Outlined.WaterDrop,
                                 contentDescription = stringResource(R.string.humidity_title),
-                                tint = CoolCyan,
+                                tint = MapAccentPrimary,
                                 modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
                                 text = if (report != null) "${report.humidityPercent}%" else "--%",
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp),
-                                color = IceWhite,
+                                color = MapTextPrimary,
                                 maxLines = 1
                             )
                         }
@@ -386,7 +391,7 @@ fun MapBottomWeatherPanel(
                             Icon(
                                 imageVector = Icons.Outlined.Speed,
                                 contentDescription = stringResource(R.string.pressure_title),
-                                tint = MutedText,
+                                tint = MapTextSecondary,
                                 modifier = Modifier.size(15.dp)
                             )
                             Spacer(modifier = Modifier.width(6.dp))
@@ -397,7 +402,7 @@ fun MapBottomWeatherPanel(
                                     "--"
                                 },
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.5.sp),
-                                color = IceWhite,
+                                color = MapTextPrimary,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -407,7 +412,7 @@ fun MapBottomWeatherPanel(
 
                 val hourlyPoints = report?.hourlyPoints.orEmpty()
                 if (hourlyPoints.isNotEmpty()) {
-                    HorizontalDivider(color = Color(0x1EFFFFFF))
+                    HorizontalDivider(color = MapElementBorder.copy(alpha = 0.7f))
                     LazyRow(
                         modifier = Modifier.fillMaxWidth(),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
@@ -421,7 +426,7 @@ fun MapBottomWeatherPanel(
                                         .padding(horizontal = 4.dp)
                                         .width(1.dp)
                                         .height(42.dp)
-                                        .background(Color(0x28FFFFFF))
+                                        .background(MapElementBorder)
                                 )
                             }
                             val isSelected = selectedHourIndex == index
@@ -431,11 +436,11 @@ fun MapBottomWeatherPanel(
                                     .minimumInteractiveComponentSize()
                                     .clip(RoundedCornerShape(14.dp))
                                     .background(
-                                        if (isSelected) Color(0x2B38BDF8) else Color.Transparent
+                                        if (isSelected) MapActiveTabBg else Color.Transparent
                                     )
                                     .border(
                                         width = if (isSelected) 1.dp else 0.dp,
-                                        color = if (isSelected) CoolCyan.copy(alpha = 0.65f) else Color.Transparent,
+                                        color = if (isSelected) MapActiveGlow else Color.Transparent,
                                         shape = RoundedCornerShape(14.dp)
                                     )
                                     .clickable { onSelectHour(index) }
@@ -447,7 +452,7 @@ fun MapBottomWeatherPanel(
                                 Text(
                                     text = point.hourLabel,
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.5.sp),
-                                    color = if (isSelected) CoolCyan else MutedText
+                                    color = if (isSelected) MapGlowSecondary else MapTextSecondary
                                 )
                                 MapGlowingWeatherIcon(
                                     weatherCode = point.weatherCode,
@@ -463,7 +468,7 @@ fun MapBottomWeatherPanel(
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Medium
                                     ),
-                                    color = IceWhite
+                                    color = MapTextPrimary
                                 )
                             }
                         }

@@ -91,6 +91,25 @@ data class GeocodingResultDto(
     @Json(name = "country_code") val countryCode: String? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class NominatimReverseResponse(
+    @Json(name = "name") val name: String? = null,
+    @Json(name = "address") val address: NominatimAddressDto? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class NominatimAddressDto(
+    @Json(name = "city") val city: String? = null,
+    @Json(name = "town") val town: String? = null,
+    @Json(name = "village") val village: String? = null,
+    @Json(name = "hamlet") val hamlet: String? = null,
+    @Json(name = "municipality") val municipality: String? = null,
+    @Json(name = "county") val county: String? = null,
+    @Json(name = "state") val state: String? = null,
+    @Json(name = "region") val region: String? = null,
+    @Json(name = "country") val country: String? = null
+)
+
 // --- RainViewer Live Radar DTOs ---
 
 @JsonClass(generateAdapter = true)

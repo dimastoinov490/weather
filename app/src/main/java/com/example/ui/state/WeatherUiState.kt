@@ -17,6 +17,7 @@ data class WeatherHomeUiState(
     val settings: WeatherSettings = WeatherSettings(),
     val isGlobalRefreshing: Boolean = false,
     val isLocating: Boolean = false,
+    val locationRecenterToken: Int = 0,
     val statusMessage: String? = null
 )
 

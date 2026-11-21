@@ -1,10 +1,15 @@
 package com.example.data.repository
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.location.Location
+import android.location.LocationManager
 import android.os.Build
+import androidx.core.content.ContextCompat
+import androidx.core.location.LocationManagerCompat
 import com.example.data.local.WeatherPreferencesRepository
 import com.example.data.model.SavedCity
 import com.example.data.model.WeatherMapper
@@ -18,8 +23,13 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.coroutines.resume
+
+class LocationPermissionMissingException : Exception("Разрешите доступ к геолокации в настройках приложения")
+class LocationServicesDisabledException : Exception("Геолокация отключена в настройках устройства. Включите GPS и попробуйте снова.")
+class LocationUnavailableException : Exception("Не удалось определить текущие координаты. Попробуйте ещё раз.")
 
 class WeatherRepository(
     private val context: Context,
@@ -28,6 +38,7 @@ class WeatherRepository(
     private val forecastApi = NetworkModule.forecastApi
     private val airQualityApi = NetworkModule.airQualityApi
     private val geocodingApi = NetworkModule.geocodingApi
+    private val nominatimApi = NetworkModule.nominatimApi
 
     suspend fun fetchWeatherForCity(city: SavedCity): Result<WeatherReport> = withContext(Dispatchers.IO) {
         runCatching {
@@ -76,26 +87,33 @@ class WeatherRepository(
     @SuppressLint("MissingPermission")
     suspend fun detectCurrentLocationCity(): Result<SavedCity> = withContext(Dispatchers.IO) {
         runCatching {
-            val client = LocationServices.getFusedLocationProviderClient(context)
-            val location: Location = suspendCancellableCoroutine<Location?> { continuation ->
-                val cts = CancellationTokenSource()
-                continuation.invokeOnCancellation { cts.cancel() }
-                client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
-                    .addOnSuccessListener { loc ->
-                        if (loc != null) {
-                            continuation.resume(loc)
-                        } else {
-                            client.lastLocation
-                                .addOnSuccessListener { last -> continuation.resume(last) }
-                                .addOnFailureListener { continuation.resume(null) }
-                        }
-                    }
-                    .addOnFailureListener {
-                        client.lastLocation
-                            .addOnSuccessListener { last -> continuation.resume(last) }
-                            .addOnFailureListener { continuation.resume(null) }
-                    }
-            } ?: error("Не удалось определить координаты устройства")
+            val hasFine = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            val hasCoarse = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasFine && !hasCoarse) {
+                throw LocationPermissionMissingException()
+            }
+
+            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            if (locationManager != null && !LocationManagerCompat.isLocationEnabled(locationManager)) {
+                throw LocationServicesDisabledException()
+            }
+
+            val priority = if (hasFine) {
+                Priority.PRIORITY_HIGH_ACCURACY
+            } else {
+                Priority.PRIORITY_BALANCED_POWER_ACCURACY
+            }
+
+            val location = getFusedLocation(priority)
+                ?: getSystemLocationManagerFallback(locationManager, hasFine)
+                ?: throw LocationUnavailableException()
 
             val (cityName, regionName, countryName) = reverseGeocodeCity(
                 location.latitude,
@@ -114,24 +132,135 @@ class WeatherRepository(
         }
     }
 
-    @Suppress("DEPRECATION")
-    private suspend fun reverseGeocodeCity(lat: Double, lon: Double): Triple<String, String, String> {
-        return runCatching {
-            val geocoder = Geocoder(context, Locale.forLanguageTag("ru-RU"))
-            val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                suspendCancellableCoroutine { cont ->
-                    geocoder.getFromLocation(lat, lon, 1) { list ->
-                        cont.resume(list)
+    @SuppressLint("MissingPermission")
+    private suspend fun getFusedLocation(priority: Int): Location? {
+        val client = LocationServices.getFusedLocationProviderClient(context)
+        val current = withTimeoutOrNull(8_000L) {
+            suspendCancellableCoroutine<Location?> { continuation ->
+                val cts = CancellationTokenSource()
+                continuation.invokeOnCancellation { cts.cancel() }
+                client.getCurrentLocation(priority, cts.token)
+                    .addOnSuccessListener { loc ->
+                        if (continuation.isActive) continuation.resume(loc)
+                    }
+                    .addOnFailureListener {
+                        if (continuation.isActive) continuation.resume(null)
+                    }
+            }
+        }
+        if (current != null) return current
+
+        return withTimeoutOrNull(2_000L) {
+            suspendCancellableCoroutine<Location?> { continuation ->
+                client.lastLocation
+                    .addOnSuccessListener { last ->
+                        if (continuation.isActive) continuation.resume(last)
+                    }
+                    .addOnFailureListener {
+                        if (continuation.isActive) continuation.resume(null)
+                    }
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun getSystemLocationManagerFallback(
+        locationManager: LocationManager?,
+        hasFine: Boolean
+    ): Location? {
+        if (locationManager == null) return null
+        val providers = buildList {
+            if (hasFine && runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) }.getOrDefault(false)) {
+                add(LocationManager.GPS_PROVIDER)
+            }
+            if (runCatching { locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)) {
+                add(LocationManager.NETWORK_PROVIDER)
+            }
+            add(LocationManager.PASSIVE_PROVIDER)
+        }
+
+        for (provider in providers) {
+            val fresh = withTimeoutOrNull(4_000L) {
+                suspendCancellableCoroutine<Location?> { continuation ->
+                    val cancelSignal = android.os.CancellationSignal()
+                    continuation.invokeOnCancellation { cancelSignal.cancel() }
+                    runCatching {
+                        LocationManagerCompat.getCurrentLocation(
+                            locationManager,
+                            provider,
+                            cancelSignal,
+                            ContextCompat.getMainExecutor(context)
+                        ) { loc ->
+                            if (continuation.isActive) continuation.resume(loc)
+                        }
+                    }.onFailure {
+                        if (continuation.isActive) continuation.resume(null)
                     }
                 }
+            }
+            if (fresh != null) return fresh
+        }
+
+        val lastCandidates = providers.mapNotNull { provider ->
+            runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull()
+        }
+        return lastCandidates.maxByOrNull { it.time }
+    }
+
+    @Suppress("DEPRECATION")
+    private suspend fun reverseGeocodeCity(lat: Double, lon: Double): Triple<String, String, String> {
+        val fromAndroidGeocoder = runCatching {
+            if (!Geocoder.isPresent()) return@runCatching null
+            val geocoder = Geocoder(context, Locale.forLanguageTag("ru-RU"))
+            val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                withTimeoutOrNull(4_000L) {
+                    suspendCancellableCoroutine { cont ->
+                        geocoder.getFromLocation(lat, lon, 1) { list ->
+                            if (cont.isActive) cont.resume(list)
+                        }
+                    }
+                }.orEmpty()
             } else {
                 geocoder.getFromLocation(lat, lon, 1).orEmpty()
             }
-            val addr = addresses.firstOrNull()
-            val name = addr?.locality ?: addr?.subAdminArea ?: addr?.adminArea ?: "Текущая геопозиция"
-            val region = addr?.adminArea.orEmpty().takeIf { it != name }.orEmpty()
-            val country = addr?.countryName.orEmpty()
+            val addr = addresses.firstOrNull() ?: return@runCatching null
+            val name = addr.locality
+                ?: addr.subLocality
+                ?: addr.subAdminArea
+                ?: addr.adminArea
+                ?: addr.featureName
+            if (name.isNullOrBlank()) return@runCatching null
+            val region = addr.adminArea.orEmpty().takeIf { it != name }.orEmpty()
+            val country = addr.countryName.orEmpty()
             Triple(name, region, country)
-        }.getOrDefault(Triple("Моё местоположение", "", ""))
+        }.getOrNull()
+
+        if (fromAndroidGeocoder != null) {
+            return fromAndroidGeocoder
+        }
+
+        val fromNominatim = runCatching {
+            val response = nominatimApi.reverseGeocode(latitude = lat, longitude = lon)
+            val addr = response.address
+            val name = addr?.city
+                ?: addr?.town
+                ?: addr?.village
+                ?: addr?.hamlet
+                ?: addr?.municipality
+                ?: addr?.county
+                ?: addr?.state
+                ?: response.name
+            if (name.isNullOrBlank()) return@runCatching null
+            val region = (addr?.state ?: addr?.region).orEmpty().takeIf { it != name }.orEmpty()
+            val country = addr?.country.orEmpty()
+            Triple(name, region, country)
+        }.getOrNull()
+
+        if (fromNominatim != null) {
+            return fromNominatim
+        }
+
+        val fallbackCoords = String.format(Locale.US, "%.2f°, %.2f°", lat, lon)
+        return Triple(fallbackCoords, "", "")
     }
 }

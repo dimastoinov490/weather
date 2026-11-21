@@ -204,9 +204,25 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun detectCurrentLocation() {
+    suspend fun hasPromptedLocationPermission(): Boolean {
+        return preferencesRepository.hasPromptedLocationFlow.first()
+    }
+
+    fun markLocationPermissionPrompted() {
         viewModelScope.launch {
-            _homeState.update { it.copy(isLocating = true, statusMessage = null) }
+            preferencesRepository.markLocationPermissionPrompted()
+        }
+    }
+
+    fun detectCurrentLocation(silentOnStartup: Boolean = false) {
+        if (_homeState.value.isLocating) return
+        viewModelScope.launch {
+            _homeState.update {
+                it.copy(
+                    isLocating = true,
+                    statusMessage = if (silentOnStartup) it.statusMessage else null
+                )
+            }
             weatherRepository.detectCurrentLocationCity()
                 .onSuccess { city ->
                     val current = preferencesRepository.savedCitiesFlow.first()
@@ -214,14 +230,24 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
                     val updated = listOf(city) + withoutOldLoc
                     preferencesRepository.saveCities(updated)
                     preferencesRepository.setSelectedCityId(city.id)
-                    _homeState.update { it.copy(isLocating = false, statusMessage = "Геопозиция: ${city.name}") }
-                    fetchCityWeather(city, silent = false)
-                }
-                .onFailure {
-                    _homeState.update {
-                        it.copy(
+                    _homeState.update { state ->
+                        state.copy(
                             isLocating = false,
-                            statusMessage = "Не удалось определить координаты. Проверьте GPS."
+                            locationRecenterToken = state.locationRecenterToken + 1,
+                            statusMessage = if (silentOnStartup) state.statusMessage else "Геопозиция: ${city.name}"
+                        )
+                    }
+                    fetchCityWeather(city, silent = silentOnStartup)
+                }
+                .onFailure { error ->
+                    _homeState.update { state ->
+                        state.copy(
+                            isLocating = false,
+                            statusMessage = if (silentOnStartup) {
+                                state.statusMessage
+                            } else {
+                                error.message ?: "Не удалось определить координаты. Проверьте GPS."
+                            }
                         )
                     }
                 }
