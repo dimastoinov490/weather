@@ -56,4 +56,10 @@
     <string name="map_offline_message">Нет подключения к интернету. Проверьте сеть и нажмите «Повторить».</string>
     <string name="map_tile_error_message">Сервер карт или радара временно не отвечает</string>
     <string name="map_attribution">© OpenStreetMap • RainViewer</string>
+    <string name="forecast_detail_title">Подробный прогноз</string>
+    <string name="forecast_days_section">Прогноз по дням</string>
+    <string name="forecast_hourly_empty">Почасовые данные для этой даты недоступны</string>
+    <string name="forecast_no_data">Нет данных</string>
+    <string name="forecast_rain_probability_title">Вероятность осадков</string>
+    <string name="forecast_reset_hour">Весь день</string>
 </resources>

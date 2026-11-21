@@ -146,177 +146,219 @@ fun HourlyTilesSection(
 fun HourlyForecastCard(
     hourlyPoints: List<HourlyForecastPoint>,
     temperatureUnit: TemperatureUnit,
+    activeHourPrefix: String? = null,
+    dayTitleSuffix: String? = null,
+    isEmptyForDate: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    if (hourlyPoints.isEmpty()) return
-
-    val itemWidthDp = 64.dp
-    val totalWidthDp = itemWidthDp * hourlyPoints.size
-    val minTemp = hourlyPoints.minOf { it.tempC }
-    val maxTemp = hourlyPoints.maxOf { it.tempC }
-    val tempSpan = (maxTemp - minTemp).coerceAtLeast(1.0)
+    if (hourlyPoints.isEmpty() && !isEmptyForDate) return
 
     GlassCard(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("hourly_forecast_card"),
         amberGlow = true
     ) {
         Column(modifier = Modifier.padding(vertical = 16.dp)) {
             Row(
-                modifier = Modifier.padding(horizontal = 18.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Icon(
-                    imageVector = Icons.Outlined.Schedule,
-                    contentDescription = null,
-                    tint = AmberPrimary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Почасовой график",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = IceWhite
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Outlined.Schedule,
+                        contentDescription = null,
+                        tint = AmberPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (dayTitleSuffix.isNullOrBlank()) {
+                            "Почасовой график"
+                        } else {
+                            "Почасовой график • $dayTitleSuffix"
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = IceWhite
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            val scrollState = rememberScrollState()
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(scrollState)
-                    .padding(horizontal = 10.dp)
-            ) {
-                Column(modifier = Modifier.width(totalWidthDp)) {
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        hourlyPoints.forEachIndexed { idx, point ->
-                            Box(
-                                modifier = Modifier.width(itemWidthDp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = WeatherFormatters.formatTemp(point.tempC, temperatureUnit),
-                                    style = MaterialTheme.typography.titleMedium.copy(
-                                        fontWeight = if (idx == 0) FontWeight.Bold else FontWeight.SemiBold
-                                    ),
-                                    color = if (idx == 0) AmberBright else IceWhite
-                                )
-                            }
-                        }
+            if (hourlyPoints.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.forecast_hourly_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MutedText,
+                    modifier = Modifier
+                        .padding(horizontal = 18.dp, vertical = 12.dp)
+                        .testTag("forecast_hourly_empty")
+                )
+            } else {
+                val itemWidthDp = 64.dp
+                val totalWidthDp = itemWidthDp * hourlyPoints.size
+                val minTemp = hourlyPoints.minOf { it.tempC }
+                val maxTemp = hourlyPoints.maxOf { it.tempC }
+                val tempSpan = (maxTemp - minTemp).coerceAtLeast(1.0)
+                val activeIndex = if (!activeHourPrefix.isNullOrBlank()) {
+                    hourlyPoints.indexOfFirst { it.timeIso.startsWith(activeHourPrefix) }
+                } else {
+                    -1
+                }
+
+                val scrollState = rememberScrollState()
+                val density = androidx.compose.ui.platform.LocalDensity.current
+                androidx.compose.runtime.LaunchedEffect(dayTitleSuffix, hourlyPoints.firstOrNull()?.timeIso) {
+                    val targetPx = if (activeIndex > 0) {
+                        with(density) { (itemWidthDp * activeIndex).toPx().toInt() }
+                    } else {
+                        0
                     }
+                    scrollState.scrollTo(targetPx.coerceIn(0, scrollState.maxValue))
+                }
 
-                    Canvas(
-                        modifier = Modifier
-                            .width(totalWidthDp)
-                            .height(56.dp)
-                    ) {
-                        val stepPx = size.width / hourlyPoints.size
-                        val topPad = 14f
-                        val bottomPad = 14f
-                        val usableHeight = (size.height - topPad - bottomPad).coerceAtLeast(10f)
-
-                        val coords = hourlyPoints.mapIndexed { idx, p ->
-                            val norm = ((p.tempC - minTemp) / tempSpan).toFloat()
-                            val x = stepPx * idx + stepPx / 2f
-                            val y = topPad + (1f - norm) * usableHeight
-                            Offset(x, y)
-                        }
-
-                        if (coords.size >= 2) {
-                            val linePath = Path().apply {
-                                moveTo(coords.first().x, coords.first().y)
-                                for (i in 0 until coords.lastIndex) {
-                                    val p0 = coords[i]
-                                    val p1 = coords[i + 1]
-                                    val midX = (p0.x + p1.x) / 2f
-                                    cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
-                                }
-                            }
-
-                            val fillPath = Path().apply {
-                                addPath(linePath)
-                                lineTo(coords.last().x, size.height)
-                                lineTo(coords.first().x, size.height)
-                                close()
-                            }
-
-                            drawPath(
-                                path = fillPath,
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(
-                                        AmberPrimary.copy(alpha = 0.28f),
-                                        Color.Transparent
-                                    )
-                                )
-                            )
-
-                            drawPath(
-                                path = linePath,
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(AmberBright, AmberPrimary, CoolCyan)
-                                ),
-                                style = Stroke(width = 4.5f, cap = StrokeCap.Round)
-                            )
-                        }
-
-                        coords.forEachIndexed { idx, pt ->
-                            if (idx == 0) {
-                                drawCircle(
-                                    color = AmberPrimary.copy(alpha = 0.36f),
-                                    radius = 12f,
-                                    center = pt
-                                )
-                                drawCircle(
-                                    color = AmberBright,
-                                    radius = 6f,
-                                    center = pt
-                                )
-                            } else if (idx % 3 == 0) {
-                                drawCircle(
-                                    color = IceWhite.copy(alpha = 0.9f),
-                                    radius = 4f,
-                                    center = pt
-                                )
-                            }
-                        }
-                    }
-
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        hourlyPoints.forEachIndexed { idx, point ->
-                            Column(
-                                modifier = Modifier
-                                    .width(itemWidthDp)
-                                    .padding(horizontal = 3.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        if (idx == 0) AmberPrimary.copy(alpha = 0.16f) else Color.Transparent
-                                    )
-                                    .padding(vertical = 8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                CompactWeatherIcon(
-                                    weatherCode = point.weatherCode,
-                                    isDay = point.isDay,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                                if (point.precipitationProb >= 15) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(scrollState)
+                        .padding(horizontal = 10.dp)
+                ) {
+                    Column(modifier = Modifier.width(totalWidthDp)) {
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            hourlyPoints.forEachIndexed { idx, point ->
+                                val isCurrent = idx == activeIndex
+                                Box(
+                                    modifier = Modifier.width(itemWidthDp),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Text(
-                                        text = "${point.precipitationProb}%",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = CoolCyan
+                                        text = WeatherFormatters.formatTemp(point.tempC, temperatureUnit),
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold
+                                        ),
+                                        color = if (isCurrent) AmberBright else IceWhite
                                     )
-                                } else {
-                                    Spacer(modifier = Modifier.height(14.dp))
                                 }
-                                Text(
-                                    text = if (idx == 0) "Сейчас" else point.hourLabel,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontWeight = if (idx == 0) FontWeight.Bold else FontWeight.Medium
-                                    ),
-                                    color = if (idx == 0) AmberBright else MutedText
+                            }
+                        }
+
+                        Canvas(
+                            modifier = Modifier
+                                .width(totalWidthDp)
+                                .height(56.dp)
+                        ) {
+                            val stepPx = size.width / hourlyPoints.size
+                            val topPad = 14f
+                            val bottomPad = 14f
+                            val usableHeight = (size.height - topPad - bottomPad).coerceAtLeast(10f)
+
+                            val coords = hourlyPoints.mapIndexed { idx, p ->
+                                val norm = ((p.tempC - minTemp) / tempSpan).toFloat()
+                                val x = stepPx * idx + stepPx / 2f
+                                val y = topPad + (1f - norm) * usableHeight
+                                Offset(x, y)
+                            }
+
+                            if (coords.size >= 2) {
+                                val linePath = Path().apply {
+                                    moveTo(coords.first().x, coords.first().y)
+                                    for (i in 0 until coords.lastIndex) {
+                                        val p0 = coords[i]
+                                        val p1 = coords[i + 1]
+                                        val midX = (p0.x + p1.x) / 2f
+                                        cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
+                                    }
+                                }
+
+                                val fillPath = Path().apply {
+                                    addPath(linePath)
+                                    lineTo(coords.last().x, size.height)
+                                    lineTo(coords.first().x, size.height)
+                                    close()
+                                }
+
+                                drawPath(
+                                    path = fillPath,
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            AmberPrimary.copy(alpha = 0.28f),
+                                            Color.Transparent
+                                        )
+                                    )
                                 )
+
+                                drawPath(
+                                    path = linePath,
+                                    brush = Brush.horizontalGradient(
+                                        colors = listOf(AmberBright, AmberPrimary, CoolCyan)
+                                    ),
+                                    style = Stroke(width = 4.5f, cap = StrokeCap.Round)
+                                )
+                            }
+
+                            coords.forEachIndexed { idx, pt ->
+                                if (idx == activeIndex) {
+                                    drawCircle(
+                                        color = AmberPrimary.copy(alpha = 0.36f),
+                                        radius = 12f,
+                                        center = pt
+                                    )
+                                    drawCircle(
+                                        color = AmberBright,
+                                        radius = 6f,
+                                        center = pt
+                                    )
+                                } else if (idx % 3 == 0) {
+                                    drawCircle(
+                                        color = IceWhite.copy(alpha = 0.9f),
+                                        radius = 4f,
+                                        center = pt
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            hourlyPoints.forEachIndexed { idx, point ->
+                                val isCurrent = idx == activeIndex
+                                Column(
+                                    modifier = Modifier
+                                        .width(itemWidthDp)
+                                        .padding(horizontal = 3.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(
+                                            if (isCurrent) AmberPrimary.copy(alpha = 0.16f) else Color.Transparent
+                                        )
+                                        .padding(vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    CompactWeatherIcon(
+                                        weatherCode = point.weatherCode,
+                                        isDay = point.isDay,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                    if (point.precipitationProb >= 15) {
+                                        Text(
+                                            text = "${point.precipitationProb}%",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = CoolCyan
+                                        )
+                                    } else {
+                                        Spacer(modifier = Modifier.height(14.dp))
+                                    }
+                                    Text(
+                                        text = if (isCurrent) "Сейчас" else point.hourLabel,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
+                                        ),
+                                        color = if (isCurrent) AmberBright else MutedText
+                                    )
+                                }
                             }
                         }
                     }

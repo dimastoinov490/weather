@@ -57,12 +57,16 @@ fun DailyForecastCard(
     temperatureUnit: TemperatureUnit,
     onSeeAllClick: (() -> Unit)? = null,
     showRangeBars: Boolean = false,
+    selectedDateIso: String? = null,
+    onSelectDay: ((DailyForecastItem) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (dailyForecasts.isEmpty()) return
 
     GlassCard(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("daily_forecast_card"),
         amberGlow = true
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -115,11 +119,28 @@ fun DailyForecastCard(
 
             dailyForecasts.forEachIndexed { index, item ->
                 val isToday = index == 0
-                if (isToday) {
+                val isSelected = if (selectedDateIso != null) {
+                    item.dateIso == selectedDateIso
+                } else {
+                    isToday
+                }
+                val rowModifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .then(
+                        if (onSelectDay != null) {
+                            Modifier
+                                .minimumInteractiveComponentSize()
+                                .clickable { onSelectDay(item) }
+                        } else {
+                            Modifier
+                        }
+                    )
+                    .testTag("daily_forecast_day_$index")
+
+                if (isSelected) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
+                        modifier = rowModifier
                             .background(Color(0xFF192030))
                             .border(1.dp, ObsidianBorder.copy(alpha = 0.8f), RoundedCornerShape(16.dp))
                             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -153,7 +174,7 @@ fun DailyForecastCard(
                                 dayMax = item.tempMaxC,
                                 weekMin = weekMinTempC,
                                 weekMax = weekMaxTempC,
-                                currentTemp = currentTempC,
+                                currentTemp = if (isToday) currentTempC else null,
                                 modifier = Modifier
                                     .width(72.dp)
                                     .height(7.dp)
@@ -178,9 +199,7 @@ fun DailyForecastCard(
                     }
                 } else {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        modifier = rowModifier.padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -214,7 +233,7 @@ fun DailyForecastCard(
                                 dayMax = item.tempMaxC,
                                 weekMin = weekMinTempC,
                                 weekMax = weekMaxTempC,
-                                currentTemp = null,
+                                currentTemp = if (isToday) currentTempC else null,
                                 modifier = Modifier
                                     .width(72.dp)
                                     .height(7.dp)
@@ -239,11 +258,18 @@ fun DailyForecastCard(
                     }
                 }
 
-                if (index in 1 until dailyForecasts.lastIndex) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        color = ObsidianDivider
-                    )
+                if (index < dailyForecasts.lastIndex && !isSelected) {
+                    val nextSelected = if (selectedDateIso != null) {
+                        dailyForecasts.getOrNull(index + 1)?.dateIso == selectedDateIso
+                    } else {
+                        false
+                    }
+                    if (!nextSelected) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 12.dp),
+                            color = ObsidianDivider
+                        )
+                    }
                 }
             }
         }

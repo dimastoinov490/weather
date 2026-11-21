@@ -44,10 +44,14 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.data.model.DailyForecastItem
+import com.example.data.model.HourlyForecastPoint
 import com.example.data.model.WeatherFormatters
 import com.example.data.model.WeatherReport
 import com.example.data.model.WeatherSettings
@@ -222,22 +226,102 @@ fun WeatherBentoGrid(
     report: WeatherReport,
     settings: WeatherSettings,
     columns: Int,
+    selectedDay: DailyForecastItem? = null,
+    dayHours: List<HourlyForecastPoint> = emptyList(),
+    isToday: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    val effectiveDay = selectedDay
+    val feelsLikeValueC: Double? = if (isToday || effectiveDay == null) {
+        report.apparentTemperatureC
+    } else {
+        effectiveDay.apparentTempMaxC ?: dayHours.mapNotNull { it.apparentTempC }.maxOrNull()
+    }
+    val feelsLikeMinC: Double? = if (isToday || effectiveDay == null) {
+        null
+    } else {
+        effectiveDay.apparentTempMinC ?: dayHours.mapNotNull { it.apparentTempC }.minOrNull()
+    }
+
+    val windSpeedKmh: Double = if (isToday || effectiveDay == null) {
+        report.windSpeedKmh
+    } else {
+        effectiveDay.windSpeedMaxKmh
+    }
+    val windDirectionDeg: Int? = if (isToday || effectiveDay == null) {
+        report.windDirectionDeg
+    } else {
+        effectiveDay.windDirectionDeg ?: dayHours.mapNotNull { it.windDirectionDeg }.firstOrNull()
+    }
+
+    val sunriseIso = effectiveDay?.sunriseIso?.takeIf { it.isNotBlank() }
+        ?: if (isToday) report.sunriseIso else ""
+    val sunsetIso = effectiveDay?.sunsetIso?.takeIf { it.isNotBlank() }
+        ?: if (isToday) report.sunsetIso else ""
+
+    val uvIndex: Double? = if (isToday || effectiveDay == null) {
+        report.uvIndexMax
+    } else {
+        effectiveDay.uvIndexMaxAvailable ?: dayHours.mapNotNull { it.uvIndex }.maxOrNull()
+    }
+
+    val humidity: Int? = if (isToday || effectiveDay == null) {
+        report.humidityPercent
+    } else {
+        val list = dayHours.mapNotNull { it.humidityPercent }
+        if (list.isNotEmpty()) list.average().roundToInt() else null
+    }
+    val cloudCover: Int? = if (isToday || effectiveDay == null) {
+        report.cloudCoverPercent
+    } else {
+        val list = dayHours.mapNotNull { it.cloudCoverPercent }
+        if (list.isNotEmpty()) list.average().roundToInt() else null
+    }
+
+    val pressureHpa: Double? = if (isToday || effectiveDay == null) {
+        report.pressureHpa
+    } else {
+        val list = dayHours.mapNotNull { it.pressureHpa }
+        if (list.isNotEmpty()) list.average() else null
+    }
+
     val cards: List<@Composable () -> Unit> = listOf(
-        { FeelsLikeCard(report = report, settings = settings) },
-        { WindCompassCard(report = report, settings = settings) },
-        { SunriseSunsetCard(report = report) },
-        { UvIndexCard(uvIndex = report.uvIndexMax) },
-        { HumidityCard(humidity = report.humidityPercent, cloudCover = report.cloudCoverPercent) },
-        { PressureGaugeCard(pressureHpa = report.pressureHpa, settings = settings) }
+        {
+            FeelsLikeCard(
+                apparentTempC = feelsLikeValueC,
+                actualTempC = if (isToday) report.temperatureC else null,
+                apparentMinC = feelsLikeMinC,
+                isToday = isToday,
+                settings = settings
+            )
+        },
+        {
+            WindCompassCard(
+                windSpeedKmh = windSpeedKmh,
+                windDirectionDeg = windDirectionDeg,
+                settings = settings
+            )
+        },
+        {
+            SunriseSunsetCard(
+                currentLocalIso = report.currentLocalIso,
+                sunriseIso = sunriseIso,
+                sunsetIso = sunsetIso,
+                showSunDot = isToday && report.isDay
+            )
+        },
+        { UvIndexCard(uvIndex = uvIndex) },
+        { HumidityCard(humidity = humidity, cloudCover = cloudCover) },
+        { PressureGaugeCard(pressureHpa = pressureHpa, settings = settings) }
     )
 
     Column(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("weather_bento_grid"),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        if (report.aqiValue != null) {
+        if (isToday && report.aqiValue != null) {
             AirQualityCard(
                 aqi = report.aqiValue,
                 pm25 = report.pm25,
@@ -290,17 +374,41 @@ private fun BentoHeader(
 
 @Composable
 private fun FeelsLikeCard(
-    report: WeatherReport,
+    apparentTempC: Double?,
+    actualTempC: Double?,
+    apparentMinC: Double?,
+    isToday: Boolean,
     settings: WeatherSettings
 ) {
-    val diff = report.apparentTemperatureC - report.temperatureC
+    val noDataText = stringResource(R.string.forecast_no_data)
+    val valueText = apparentTempC?.let {
+        WeatherFormatters.formatTemp(it, settings.temperatureUnit)
+    } ?: noDataText
+
     val note = when {
-        diff <= -2.5 -> "Холоднее из-за ветра"
-        diff >= 2.5 -> "Теплее из-за влажности"
-        else -> "Совпадает с фактической"
+        apparentTempC == null -> "Нет данных на день"
+        isToday && actualTempC != null -> {
+            val diff = apparentTempC - actualTempC
+            when {
+                diff <= -2.5 -> "Холоднее из-за ветра"
+                diff >= 2.5 -> "Теплее из-за влажности"
+                else -> "Совпадает с фактической"
+            }
+        }
+        apparentMinC != null -> {
+            val minFormatted = WeatherFormatters.formatTemp(apparentMinC, settings.temperatureUnit)
+            val maxFormatted = WeatherFormatters.formatTemp(apparentTempC, settings.temperatureUnit)
+            "От $minFormatted до $maxFormatted"
+        }
+        else -> "Дневной максимум"
     }
 
-    GlassCard(modifier = Modifier.fillMaxWidth().height(162.dp)) {
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(162.dp)
+            .testTag("bento_feels_like")
+    ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.SpaceBetween
@@ -311,15 +419,23 @@ private fun FeelsLikeCard(
             )
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = WeatherFormatters.formatTemp(report.apparentTemperatureC, settings.temperatureUnit),
-                style = MaterialTheme.typography.displayMedium,
-                color = IceWhite
+                text = valueText,
+                style = if (apparentTempC != null) {
+                    MaterialTheme.typography.displayMedium
+                } else {
+                    MaterialTheme.typography.titleLarge
+                },
+                color = IceWhite,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.weight(1f))
             Text(
                 text = note,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MutedText
+                color = MutedText,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -327,14 +443,20 @@ private fun FeelsLikeCard(
 
 @Composable
 private fun WindCompassCard(
-    report: WeatherReport,
+    windSpeedKmh: Double,
+    windDirectionDeg: Int?,
     settings: WeatherSettings
 ) {
-    val speedFormatted = WeatherFormatters.formatWind(report.windSpeedKmh, settings.windSpeedUnit)
-    val dirShort = WeatherFormatters.windDirectionCompass(report.windDirectionDeg)
-    val dirFull = WeatherFormatters.windDirectionFull(report.windDirectionDeg)
+    val speedFormatted = WeatherFormatters.formatWind(windSpeedKmh, settings.windSpeedUnit)
+    val dirShort = windDirectionDeg?.let { WeatherFormatters.windDirectionCompass(it) } ?: "—"
+    val dirFull = windDirectionDeg?.let { WeatherFormatters.windDirectionFull(it) } ?: "Направление неизвестно"
 
-    GlassCard(modifier = Modifier.fillMaxWidth().height(162.dp)) {
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(162.dp)
+            .testTag("bento_wind")
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             BentoHeader(
                 icon = Icons.Outlined.Air,
@@ -351,13 +473,17 @@ private fun WindCompassCard(
                     Text(
                         text = speedFormatted,
                         style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = IceWhite
+                        color = IceWhite,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = dirFull,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MutedText
+                        color = MutedText,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
@@ -377,17 +503,19 @@ private fun WindCompassCard(
                             val p2 = Offset(c.x + cos(ang).toFloat() * r, c.y + sin(ang).toFloat() * r)
                             drawLine(Color.White.copy(alpha = 0.45f), p1, p2, strokeWidth = 2f)
                         }
-                        val rad = ((report.windDirectionDeg - 90) * PI / 180.0)
-                        val tip = Offset(c.x + cos(rad).toFloat() * (r - 5f), c.y + sin(rad).toFloat() * (r - 5f))
-                        val tail = Offset(c.x - cos(rad).toFloat() * (r - 12f), c.y - sin(rad).toFloat() * (r - 12f))
-                        drawLine(
-                            color = SkyCyan,
-                            start = tail,
-                            end = tip,
-                            strokeWidth = 3.5f,
-                            cap = StrokeCap.Round
-                        )
-                        drawCircle(color = AmberPrimary, radius = 5f, center = tip)
+                        if (windDirectionDeg != null) {
+                            val rad = ((windDirectionDeg - 90) * PI / 180.0)
+                            val tip = Offset(c.x + cos(rad).toFloat() * (r - 5f), c.y + sin(rad).toFloat() * (r - 5f))
+                            val tail = Offset(c.x - cos(rad).toFloat() * (r - 12f), c.y - sin(rad).toFloat() * (r - 12f))
+                            drawLine(
+                                color = SkyCyan,
+                                start = tail,
+                                end = tip,
+                                strokeWidth = 3.5f,
+                                cap = StrokeCap.Round
+                            )
+                            drawCircle(color = AmberPrimary, radius = 5f, center = tip)
+                        }
                     }
                     Text(
                         text = dirShort,
@@ -401,16 +529,26 @@ private fun WindCompassCard(
 }
 
 @Composable
-private fun SunriseSunsetCard(report: WeatherReport) {
-    val sunrise = WeatherFormatters.extractTimeHm(report.sunriseIso)
-    val sunset = WeatherFormatters.extractTimeHm(report.sunsetIso)
-    val progress = WeatherFormatters.computeDayProgress(
-        report.currentLocalIso,
-        report.sunriseIso,
-        report.sunsetIso
-    )
+private fun SunriseSunsetCard(
+    currentLocalIso: String,
+    sunriseIso: String,
+    sunsetIso: String,
+    showSunDot: Boolean
+) {
+    val sunrise = WeatherFormatters.extractTimeHm(sunriseIso)
+    val sunset = WeatherFormatters.extractTimeHm(sunsetIso)
+    val progress = if (showSunDot) {
+        WeatherFormatters.computeDayProgress(currentLocalIso, sunriseIso, sunsetIso)
+    } else {
+        0.5f
+    }
 
-    GlassCard(modifier = Modifier.fillMaxWidth().height(162.dp)) {
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(162.dp)
+            .testTag("bento_sunrise_sunset")
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             BentoHeader(
                 icon = Icons.Outlined.WbTwilight,
@@ -448,12 +586,12 @@ private fun SunriseSunsetCard(report: WeatherReport) {
                     style = Stroke(width = 4f, cap = StrokeCap.Round)
                 )
 
-                val t = progress
-                val oneMinusT = 1f - t
-                val sunX = oneMinusT * oneMinusT * startX + 2f * oneMinusT * t * midX + t * t * endX
-                val sunY = oneMinusT * oneMinusT * horizonY + 2f * oneMinusT * t * ctrlY + t * t * horizonY
+                if (showSunDot) {
+                    val t = progress
+                    val oneMinusT = 1f - t
+                    val sunX = oneMinusT * oneMinusT * startX + 2f * oneMinusT * t * midX + t * t * endX
+                    val sunY = oneMinusT * oneMinusT * horizonY + 2f * oneMinusT * t * ctrlY + t * t * horizonY
 
-                if (report.isDay) {
                     drawCircle(
                         color = AmberPrimary.copy(alpha = 0.36f),
                         radius = 15f,
@@ -486,20 +624,40 @@ private fun SunriseSunsetCard(report: WeatherReport) {
 }
 
 @Composable
-private fun UvIndexCard(uvIndex: Double) {
-    val uvInt = uvIndex.roundToInt()
-    val level = WeatherFormatters.uvIndexDescription(uvIndex)
-    val uvFrac = (uvIndex / 11.0).toFloat().coerceIn(0f, 1f)
+private fun UvIndexCard(uvIndex: Double?) {
+    val noDataText = stringResource(R.string.forecast_no_data)
+    val uvInt = uvIndex?.roundToInt()
+    val level = uvIndex?.let { WeatherFormatters.uvIndexDescription(it) } ?: "УФ-индекс недоступен"
+    val uvFrac = uvIndex?.let { (it / 11.0).toFloat().coerceIn(0f, 1f) }
 
-    GlassCard(modifier = Modifier.fillMaxWidth().height(162.dp)) {
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(162.dp)
+            .testTag("bento_uv")
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             BentoHeader(
                 icon = Icons.Outlined.WbSunny,
                 title = stringResource(R.string.uv_index_title)
             )
             Spacer(modifier = Modifier.height(10.dp))
-            Text(text = "$uvInt", style = MaterialTheme.typography.displayMedium, color = IceWhite)
-            Text(text = level, style = MaterialTheme.typography.titleMedium, color = MutedText)
+            Text(
+                text = uvInt?.toString() ?: noDataText,
+                style = if (uvInt != null) {
+                    MaterialTheme.typography.displayMedium
+                } else {
+                    MaterialTheme.typography.titleLarge
+                },
+                color = IceWhite
+            )
+            Text(
+                text = level,
+                style = MaterialTheme.typography.titleMedium,
+                color = MutedText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
             Spacer(modifier = Modifier.weight(1f))
             Canvas(
                 modifier = Modifier
@@ -515,18 +673,26 @@ private fun UvIndexCard(uvIndex: Double) {
                     topLeft = Offset(0f, size.height * 0.175f),
                     cornerRadius = CornerRadius(r, r)
                 )
-                val dotX = (uvFrac * size.width).coerceIn(r, size.width - r)
-                drawCircle(color = IceWhite, radius = size.height * 0.55f, center = Offset(dotX, size.height / 2f))
+                if (uvFrac != null) {
+                    val dotX = (uvFrac * size.width).coerceIn(r, size.width - r)
+                    drawCircle(color = IceWhite, radius = size.height * 0.55f, center = Offset(dotX, size.height / 2f))
+                }
             }
         }
     }
 }
 
 @Composable
-private fun HumidityCard(humidity: Int, cloudCover: Int) {
-    val comfort = WeatherFormatters.humidityComfortLabel(humidity)
+private fun HumidityCard(humidity: Int?, cloudCover: Int?) {
+    val noDataText = stringResource(R.string.forecast_no_data)
+    val comfort = humidity?.let { WeatherFormatters.humidityComfortLabel(it) } ?: "Почасовых данных нет"
 
-    GlassCard(modifier = Modifier.fillMaxWidth().height(162.dp)) {
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(162.dp)
+            .testTag("bento_humidity")
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             BentoHeader(
                 icon = Icons.Outlined.WaterDrop,
@@ -534,28 +700,50 @@ private fun HumidityCard(humidity: Int, cloudCover: Int) {
                 iconTint = SkyAzure
             )
             Spacer(modifier = Modifier.height(10.dp))
-            Text(text = "$humidity%", style = MaterialTheme.typography.displayMedium, color = IceWhite)
-            Text(text = comfort, style = MaterialTheme.typography.bodyMedium, color = MutedText)
-            Spacer(modifier = Modifier.weight(1f))
             Text(
-                text = "Облачность: $cloudCover%",
-                style = MaterialTheme.typography.bodyMedium,
-                color = SkyAzure
+                text = humidity?.let { "$it%" } ?: noDataText,
+                style = if (humidity != null) {
+                    MaterialTheme.typography.displayMedium
+                } else {
+                    MaterialTheme.typography.titleLarge
+                },
+                color = IceWhite
             )
+            Text(
+                text = comfort,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MutedText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            if (cloudCover != null) {
+                Text(
+                    text = "Облачность: $cloudCover%",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = SkyAzure
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun PressureGaugeCard(
-    pressureHpa: Double,
+    pressureHpa: Double?,
     settings: WeatherSettings
 ) {
-    val numberPart = WeatherFormatters.formatPressureValue(pressureHpa, settings.pressureUnit)
-    val unitPart = settings.pressureUnit.label
-    val norm = ((pressureHpa - 970.0) / 80.0).toFloat().coerceIn(0f, 1f)
+    val noDataText = stringResource(R.string.forecast_no_data)
+    val numberPart = pressureHpa?.let { WeatherFormatters.formatPressureValue(it, settings.pressureUnit) } ?: noDataText
+    val unitPart = if (pressureHpa != null) settings.pressureUnit.label else ""
+    val norm = pressureHpa?.let { ((it - 970.0) / 80.0).toFloat().coerceIn(0f, 1f) }
 
-    GlassCard(modifier = Modifier.fillMaxWidth().height(162.dp)) {
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(162.dp)
+            .testTag("bento_pressure")
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             BentoHeader(
                 icon = Icons.Outlined.Compress,
@@ -563,14 +751,24 @@ private fun PressureGaugeCard(
             )
             Spacer(modifier = Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.Bottom) {
-                Text(text = numberPart, style = MaterialTheme.typography.headlineLarge, color = IceWhite)
-                Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = unitPart,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MutedText,
-                    modifier = Modifier.padding(bottom = 4.dp)
+                    text = numberPart,
+                    style = if (pressureHpa != null) {
+                        MaterialTheme.typography.headlineLarge
+                    } else {
+                        MaterialTheme.typography.titleLarge
+                    },
+                    color = IceWhite
                 )
+                if (unitPart.isNotEmpty()) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = unitPart,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MutedText,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
             }
             Spacer(modifier = Modifier.weight(1f))
             Canvas(
@@ -589,15 +787,17 @@ private fun PressureGaugeCard(
                     size = arcSize,
                     style = Stroke(width = 7f, cap = StrokeCap.Round)
                 )
-                drawArc(
-                    brush = Brush.horizontalGradient(listOf(SkyAzure, AmberPrimary)),
-                    startAngle = 190f,
-                    sweepAngle = 160f * norm,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = 7f, cap = StrokeCap.Round)
-                )
+                if (norm != null) {
+                    drawArc(
+                        brush = Brush.horizontalGradient(listOf(SkyAzure, AmberPrimary)),
+                        startAngle = 190f,
+                        sweepAngle = 160f * norm,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        style = Stroke(width = 7f, cap = StrokeCap.Round)
+                    )
+                }
             }
         }
     }

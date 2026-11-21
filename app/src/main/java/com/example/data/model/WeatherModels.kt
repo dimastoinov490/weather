@@ -40,23 +40,35 @@ data class CurrentWeatherDto(
 @JsonClass(generateAdapter = true)
 data class HourlyWeatherDto(
     @Json(name = "time") val time: List<String>,
-    @Json(name = "temperature_2m") val temperature2m: List<Double>,
+    @Json(name = "temperature_2m") val temperature2m: List<Double?>,
+    @Json(name = "apparent_temperature") val apparentTemperature: List<Double?> = emptyList(),
+    @Json(name = "relative_humidity_2m") val relativeHumidity2m: List<Int?> = emptyList(),
     @Json(name = "precipitation_probability") val precipitationProbability: List<Int?> = emptyList(),
-    @Json(name = "weather_code") val weatherCode: List<Int>,
-    @Json(name = "is_day") val isDay: List<Int> = emptyList()
+    @Json(name = "precipitation") val precipitation: List<Double?> = emptyList(),
+    @Json(name = "weather_code") val weatherCode: List<Int?>,
+    @Json(name = "cloud_cover") val cloudCover: List<Int?> = emptyList(),
+    @Json(name = "pressure_msl") val pressureMsl: List<Double?> = emptyList(),
+    @Json(name = "wind_speed_10m") val windSpeed10m: List<Double?> = emptyList(),
+    @Json(name = "wind_direction_10m") val windDirection10m: List<Int?> = emptyList(),
+    @Json(name = "uv_index") val uvIndex: List<Double?> = emptyList(),
+    @Json(name = "is_day") val isDay: List<Int?> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)
 data class DailyWeatherDto(
     @Json(name = "time") val time: List<String>,
-    @Json(name = "weather_code") val weatherCode: List<Int>,
-    @Json(name = "temperature_2m_max") val temperature2mMax: List<Double>,
-    @Json(name = "temperature_2m_min") val temperature2mMin: List<Double>,
-    @Json(name = "sunrise") val sunrise: List<String> = emptyList(),
-    @Json(name = "sunset") val sunset: List<String> = emptyList(),
+    @Json(name = "weather_code") val weatherCode: List<Int?>,
+    @Json(name = "temperature_2m_max") val temperature2mMax: List<Double?>,
+    @Json(name = "temperature_2m_min") val temperature2mMin: List<Double?>,
+    @Json(name = "apparent_temperature_max") val apparentTemperatureMax: List<Double?> = emptyList(),
+    @Json(name = "apparent_temperature_min") val apparentTemperatureMin: List<Double?> = emptyList(),
+    @Json(name = "sunrise") val sunrise: List<String?> = emptyList(),
+    @Json(name = "sunset") val sunset: List<String?> = emptyList(),
     @Json(name = "uv_index_max") val uvIndexMax: List<Double?> = emptyList(),
+    @Json(name = "precipitation_sum") val precipitationSum: List<Double?> = emptyList(),
     @Json(name = "precipitation_probability_max") val precipitationProbabilityMax: List<Int?> = emptyList(),
-    @Json(name = "wind_speed_10m_max") val windSpeed10mMax: List<Double?> = emptyList()
+    @Json(name = "wind_speed_10m_max") val windSpeed10mMax: List<Double?> = emptyList(),
+    @Json(name = "wind_direction_10m_dominant") val windDirection10mDominant: List<Int?> = emptyList()
 )
 
 // --- Open-Meteo Air Quality API DTOs ---
@@ -183,7 +195,15 @@ data class HourlyForecastPoint(
     val tempC: Double,
     val precipitationProb: Int,
     val weatherCode: Int,
-    val isDay: Boolean
+    val isDay: Boolean,
+    val precipitationMm: Double? = null,
+    val windSpeedKmh: Double? = null,
+    val windDirectionDeg: Int? = null,
+    val apparentTempC: Double? = null,
+    val humidityPercent: Int? = null,
+    val pressureHpa: Double? = null,
+    val uvIndex: Double? = null,
+    val cloudCoverPercent: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -196,7 +216,15 @@ data class DailyForecastItem(
     val tempMaxC: Double,
     val precipitationProbMax: Int,
     val uvIndexMax: Double,
-    val windSpeedMaxKmh: Double
+    val windSpeedMaxKmh: Double,
+    val fullDayName: String = "",
+    val sunriseIso: String = "",
+    val sunsetIso: String = "",
+    val precipitationSumMm: Double? = null,
+    val windDirectionDeg: Int? = null,
+    val apparentTempMinC: Double? = null,
+    val apparentTempMaxC: Double? = null,
+    val uvIndexMaxAvailable: Double? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -228,7 +256,10 @@ data class WeatherReport(
     val hourlyPoints: List<HourlyForecastPoint>,
     val dailyForecasts: List<DailyForecastItem>,
     val weekMinTempC: Double,
-    val weekMaxTempC: Double
+    val weekMaxTempC: Double,
+    val allHourlyPoints: List<HourlyForecastPoint> = emptyList(),
+    val timezoneName: String = "",
+    val utcOffsetSeconds: Int = 0
 ) {
     val mood: WeatherMood
         get() = runCatching { WeatherMood.valueOf(weatherMoodName) }
@@ -345,42 +376,66 @@ object WeatherMapper {
         val uvMaxToday = forecast.daily.uvIndexMax.firstOrNull() ?: 0.0
 
         val currentHourPrefix = current.time.take(13)
-        val startIndex = forecast.hourly.time.indexOfFirst { it.startsWith(currentHourPrefix) }
-            .takeIf { it >= 0 } ?: 0
-
-        val hourlyList = mutableListOf<HourlyForecastPoint>()
-        val endIndex = minOf(startIndex + 24, forecast.hourly.time.size)
-        for (i in startIndex until endIndex) {
+        val allHourlyList = mutableListOf<HourlyForecastPoint>()
+        for (i in forecast.hourly.time.indices) {
             val iso = forecast.hourly.time[i]
+            val tempVal = forecast.hourly.temperature2m.getOrNull(i) ?: continue
+            val codeVal = forecast.hourly.weatherCode.getOrNull(i) ?: current.weatherCode
             val hourStr = iso.substringAfter("T").take(5)
-            hourlyList.add(
+            allHourlyList.add(
                 HourlyForecastPoint(
                     timeIso = iso,
                     hourLabel = hourStr,
-                    tempC = forecast.hourly.temperature2m.getOrElse(i) { current.temperature2m },
+                    tempC = tempVal,
                     precipitationProb = forecast.hourly.precipitationProbability.getOrNull(i) ?: 0,
-                    weatherCode = forecast.hourly.weatherCode.getOrElse(i) { current.weatherCode },
-                    isDay = forecast.hourly.isDay.getOrElse(i) { current.isDay } == 1
+                    weatherCode = codeVal,
+                    isDay = (forecast.hourly.isDay.getOrNull(i) ?: current.isDay) == 1,
+                    precipitationMm = forecast.hourly.precipitation.getOrNull(i),
+                    windSpeedKmh = forecast.hourly.windSpeed10m.getOrNull(i),
+                    windDirectionDeg = forecast.hourly.windDirection10m.getOrNull(i),
+                    apparentTempC = forecast.hourly.apparentTemperature.getOrNull(i),
+                    humidityPercent = forecast.hourly.relativeHumidity2m.getOrNull(i),
+                    pressureHpa = forecast.hourly.pressureMsl.getOrNull(i),
+                    uvIndex = forecast.hourly.uvIndex.getOrNull(i),
+                    cloudCoverPercent = forecast.hourly.cloudCover.getOrNull(i)
                 )
             )
         }
 
+        val startIndex = allHourlyList.indexOfFirst { it.timeIso.startsWith(currentHourPrefix) }
+            .takeIf { it >= 0 } ?: 0
+        val hourlyList = if (allHourlyList.isNotEmpty()) {
+            allHourlyList.subList(startIndex, minOf(startIndex + 24, allHourlyList.size)).toList()
+        } else {
+            emptyList()
+        }
+
         val dailyList = mutableListOf<DailyForecastItem>()
-        val dailyCount = minOf(7, forecast.daily.time.size)
-        for (i in 0 until dailyCount) {
+        for (i in forecast.daily.time.indices) {
             val dateIso = forecast.daily.time[i]
-            val (dayName, dateLabel) = formatDailyLabels(dateIso, index = i)
+            val tempMin = forecast.daily.temperature2mMin.getOrNull(i) ?: continue
+            val tempMax = forecast.daily.temperature2mMax.getOrNull(i) ?: continue
+            val (dayName, dateLabel, fullDayName) = formatDailyLabels(dateIso, index = i)
+            val uvVal = forecast.daily.uvIndexMax.getOrNull(i)
             dailyList.add(
                 DailyForecastItem(
                     dateIso = dateIso,
                     dayName = dayName,
                     dateLabel = dateLabel,
-                    weatherCode = forecast.daily.weatherCode.getOrElse(i) { current.weatherCode },
-                    tempMinC = forecast.daily.temperature2mMin.getOrElse(i) { current.temperature2m },
-                    tempMaxC = forecast.daily.temperature2mMax.getOrElse(i) { current.temperature2m },
+                    weatherCode = forecast.daily.weatherCode.getOrNull(i) ?: current.weatherCode,
+                    tempMinC = tempMin,
+                    tempMaxC = tempMax,
                     precipitationProbMax = forecast.daily.precipitationProbabilityMax.getOrNull(i) ?: 0,
-                    uvIndexMax = forecast.daily.uvIndexMax.getOrNull(i) ?: 0.0,
-                    windSpeedMaxKmh = forecast.daily.windSpeed10mMax.getOrNull(i) ?: current.windSpeed10m
+                    uvIndexMax = uvVal ?: 0.0,
+                    windSpeedMaxKmh = forecast.daily.windSpeed10mMax.getOrNull(i) ?: current.windSpeed10m,
+                    fullDayName = fullDayName,
+                    sunriseIso = forecast.daily.sunrise.getOrNull(i).orEmpty(),
+                    sunsetIso = forecast.daily.sunset.getOrNull(i).orEmpty(),
+                    precipitationSumMm = forecast.daily.precipitationSum.getOrNull(i),
+                    windDirectionDeg = forecast.daily.windDirection10mDominant.getOrNull(i),
+                    apparentTempMinC = forecast.daily.apparentTemperatureMin.getOrNull(i),
+                    apparentTempMaxC = forecast.daily.apparentTemperatureMax.getOrNull(i),
+                    uvIndexMaxAvailable = uvVal
                 )
             )
         }
@@ -419,22 +474,27 @@ object WeatherMapper {
             aqiValue = airQuality?.current?.europeanAqi,
             pm25 = airQuality?.current?.pm25,
             pm10 = airQuality?.current?.pm10,
-            sunriseIso = forecast.daily.sunrise.firstOrNull() ?: "",
-            sunsetIso = forecast.daily.sunset.firstOrNull() ?: "",
+            sunriseIso = forecast.daily.sunrise.firstOrNull().orEmpty(),
+            sunsetIso = forecast.daily.sunset.firstOrNull().orEmpty(),
             hourlyPoints = hourlyList,
             dailyForecasts = dailyList,
             weekMinTempC = weekMin,
-            weekMaxTempC = weekMax
+            weekMaxTempC = weekMax,
+            allHourlyPoints = allHourlyList,
+            timezoneName = forecast.timezone,
+            utcOffsetSeconds = forecast.utcOffsetSeconds
         )
     }
 
-    private fun formatDailyLabels(dateIso: String, index: Int): Pair<String, String> {
+    private fun formatDailyLabels(dateIso: String, index: Int): Triple<String, String, String> {
         return try {
             val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-            val date: Date = parser.parse(dateIso) ?: return Pair(dateIso, "")
+            val date: Date = parser.parse(dateIso) ?: return Triple(dateIso, "", dateIso)
             val cal = Calendar.getInstance().apply { time = date }
-            val dateFormatted = SimpleDateFormat("d MMM", russianLocale).format(date)
-            val dayName = when (index) {
+            val dateFormatted = SimpleDateFormat("d MMM", russianLocale)
+                .format(date)
+                .trimEnd('.')
+            val shortDay = when (index) {
                 0 -> "Сегодня"
                 else -> {
                     when (cal.get(Calendar.DAY_OF_WEEK)) {
@@ -449,9 +509,25 @@ object WeatherMapper {
                     }
                 }
             }
-            Pair(dayName, dateFormatted)
+            val fullDay = when (index) {
+                0 -> "Сегодня"
+                1 -> "Завтра"
+                else -> {
+                    when (cal.get(Calendar.DAY_OF_WEEK)) {
+                        Calendar.MONDAY -> "Понедельник"
+                        Calendar.TUESDAY -> "Вторник"
+                        Calendar.WEDNESDAY -> "Среда"
+                        Calendar.THURSDAY -> "Четверг"
+                        Calendar.FRIDAY -> "Пятница"
+                        Calendar.SATURDAY -> "Суббота"
+                        Calendar.SUNDAY -> "Воскресенье"
+                        else -> shortDay
+                    }
+                }
+            }
+            Triple(shortDay, dateFormatted, fullDay)
         } catch (_: Exception) {
-            Pair(dateIso, "")
+            Triple(dateIso, "", dateIso)
         }
     }
 }
@@ -558,6 +634,45 @@ object WeatherFormatters {
             humidity <= 60 -> "Комфортная"
             humidity <= 80 -> "Повышенная"
             else -> "Высокая влажность"
+        }
+    }
+
+    fun formatPrecipitationMm(mm: Double): String {
+        return if (mm < 0.05) "0 мм" else String.format(Locale.US, "%.1f мм", mm)
+    }
+
+    fun resolveDayFullTitle(item: DailyForecastItem, index: Int): String {
+        if (item.fullDayName.isNotBlank()) return item.fullDayName
+        return try {
+            val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val date = parser.parse(item.dateIso) ?: return item.dayName
+            val cal = Calendar.getInstance().apply { time = date }
+            when (index) {
+                0 -> "Сегодня"
+                1 -> "Завтра"
+                else -> when (cal.get(Calendar.DAY_OF_WEEK)) {
+                    Calendar.MONDAY -> "Понедельник"
+                    Calendar.TUESDAY -> "Вторник"
+                    Calendar.WEDNESDAY -> "Среда"
+                    Calendar.THURSDAY -> "Четверг"
+                    Calendar.FRIDAY -> "Пятница"
+                    Calendar.SATURDAY -> "Суббота"
+                    Calendar.SUNDAY -> "Воскресенье"
+                    else -> item.dayName
+                }
+            }
+        } catch (_: Exception) {
+            item.dayName
+        }
+    }
+
+    fun formatDateLongRu(dateIso: String): String {
+        return try {
+            val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val date = parser.parse(dateIso) ?: return dateIso
+            SimpleDateFormat("d MMMM", Locale.forLanguageTag("ru-RU")).format(date)
+        } catch (_: Exception) {
+            dateIso
         }
     }
 }
